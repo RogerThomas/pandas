@@ -1140,6 +1140,20 @@ class TestDataFrameAnalytics(tm.TestCase, TestData):
         expected = df.sort_values(['a', 'b'], ascending=False).head(5)
         tm.assert_frame_equal(result, expected)
 
+    def test_nlargest_nsmallest_identical_values(self):
+        # GH15297
+        df = pd.DataFrame({'a': [1] * 5, 'b': [1, 2, 3, 4, 5]})
+
+        result = df.nlargest(3, 'a')
+        expected = pd.DataFrame(
+            {'a': [1] * 3, 'b': [5, 4, 3]}, index=[4, 3, 2]
+        )
+        tm.assert_frame_equal(result, expected)
+
+        result = df.nsmallest(3, 'a')
+        expected = pd.DataFrame({'a': [1] * 3, 'b': [1, 2, 3]})
+        tm.assert_frame_equal(result, expected)
+
     def test_nsmallest(self):
         from string import ascii_lowercase
         df = pd.DataFrame({'a': np.random.permutation(10),
@@ -1159,33 +1173,32 @@ class TestDataFrameAnalytics(tm.TestCase, TestData):
 
     def test_nsmallest_nlargest_duplicate_index(self):
         # GH 13412
-        df = pd.DataFrame({'a': [1, 2, 3, 4],
-                           'b': [4, 3, 2, 1],
-                           'c': [0, 1, 2, 3]},
-                          index=[0, 0, 1, 1])
-        result = df.nsmallest(4, 'a')
-        expected = df.sort_values('a').head(4)
+        df = pd.DataFrame({'a': [1, 2, 3, 3, 3],
+                           'b': [1, 1, 1, 1, 1],
+                           'c': [0, 1, 2, 5, 4]},
+                          index=[0, 0, 1, 1, 1])
+
+        result = df.nsmallest(4, ['a', 'b', 'c'])
+        expected = df.sort_values(['a', 'b', 'c']).head(4)
         tm.assert_frame_equal(result, expected)
 
-        result = df.nlargest(4, 'a')
-        expected = df.sort_values('a', ascending=False).head(4)
+        result = df.nlargest(4, ['a', 'b', 'c'])
+        expected = df.sort_values(['a', 'b', 'c'], ascending=False).head(4)
         tm.assert_frame_equal(result, expected)
 
-        result = df.nsmallest(4, ['a', 'c'])
-        expected = df.sort_values(['a', 'c']).head(4)
+        result = df.nlargest(4, ['c', 'b', 'a'])
+        expected = df.sort_values(['c', 'b', 'a'], ascending=False).head(4)
         tm.assert_frame_equal(result, expected)
 
-        result = df.nsmallest(4, ['c', 'a'])
-        expected = df.sort_values(['c', 'a']).head(4)
+        result = df.nsmallest(4, ['c', 'b', 'a'])
+        expected = df.sort_values(['c', 'b', 'a']).head(4)
         tm.assert_frame_equal(result, expected)
 
-        result = df.nlargest(4, ['a', 'c'])
-        expected = df.sort_values(['a', 'c'], ascending=False).head(4)
+        # Test all duplicates still returns df of size n
+        result = df.nsmallest(2, 'b')
+        expected = df.sort_values('b').head(2)
         tm.assert_frame_equal(result, expected)
 
-        result = df.nlargest(4, ['c', 'a'])
-        expected = df.sort_values(['c', 'a'], ascending=False).head(4)
-        tm.assert_frame_equal(result, expected)
     # ----------------------------------------------------------------------
     # Isin
 
