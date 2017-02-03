@@ -1323,6 +1323,12 @@ class TestDataFrameAnalytics(tm.TestCase, TestData):
         expected = df.sort_values(['a', 'b'], ascending=False).head(5)
         tm.assert_frame_equal(result, expected)
 
+    def test_nlargest_identical_values(self):
+        df = pd.DataFrame({'a': [1] * 5, 'b': [1, 2, 3, 4, 5]})
+        result = df.nlargest(3, 'a')
+        expected = pd.DataFrame({'a': [1] * 3, 'b': [1, 2, 3]})
+        tm.assert_frame_equal(result, expected)
+
     def test_nsmallest(self):
         from string import ascii_lowercase
         df = pd.DataFrame({'a': np.random.permutation(10),

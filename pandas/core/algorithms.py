@@ -911,10 +911,15 @@ def select_n_frame(frame, columns, n, method, keep):
     if not is_list_like(columns):
         columns = [columns]
     columns = list(columns)
+    tmp = Series(frame.index)
+    frame.reset_index(inplace=True, drop=True)
     ser = getattr(frame[columns[0]], method)(n, keep=keep)
     if isinstance(ser, Series):
         ser = ser.to_frame()
-    return ser.merge(frame, on=columns[0], left_index=True)[frame.columns]
+    ret = frame.ix[ser.index]
+    frame.index = tmp
+    ret.index = tmp.align(ser, axis=0, join='inner')[0]
+    return ret
 
 
 def _finalize_nsmallest(arr, kth_val, n, keep, narr):
