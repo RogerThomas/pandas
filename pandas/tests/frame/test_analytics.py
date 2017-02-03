@@ -7,11 +7,12 @@ from distutils.version import LooseVersion
 import sys
 import pytest
 
+from string import ascii_lowercase
 from numpy import nan
 from numpy.random import randn
 import numpy as np
 
-from pandas.compat import lrange
+from pandas.compat import lrange, product
 from pandas import (compat, isnull, notnull, DataFrame, Series,
                     MultiIndex, date_range, Timestamp)
 import pandas as pd
@@ -1120,73 +1121,6 @@ class TestDataFrameAnalytics(tm.TestCase, TestData):
                 self.assertTrue(r1.all())
 
     # ----------------------------------------------------------------------
-    # Top / bottom
-
-    def test_nlargest(self):
-        # GH10393
-        from string import ascii_lowercase
-        df = pd.DataFrame({'a': np.random.permutation(10),
-                           'b': list(ascii_lowercase[:10])})
-        result = df.nlargest(5, 'a')
-        expected = df.sort_values('a', ascending=False).head(5)
-        tm.assert_frame_equal(result, expected)
-
-    def test_nlargest_multiple_columns(self):
-        from string import ascii_lowercase
-        df = pd.DataFrame({'a': np.random.permutation(10),
-                           'b': list(ascii_lowercase[:10]),
-                           'c': np.random.permutation(10).astype('float64')})
-        result = df.nlargest(5, ['a', 'b'])
-        expected = df.sort_values(['a', 'b'], ascending=False).head(5)
-        tm.assert_frame_equal(result, expected)
-
-    def test_nsmallest(self):
-        from string import ascii_lowercase
-        df = pd.DataFrame({'a': np.random.permutation(10),
-                           'b': list(ascii_lowercase[:10])})
-        result = df.nsmallest(5, 'a')
-        expected = df.sort_values('a').head(5)
-        tm.assert_frame_equal(result, expected)
-
-    def test_nsmallest_multiple_columns(self):
-        from string import ascii_lowercase
-        df = pd.DataFrame({'a': np.random.permutation(10),
-                           'b': list(ascii_lowercase[:10]),
-                           'c': np.random.permutation(10).astype('float64')})
-        result = df.nsmallest(5, ['a', 'c'])
-        expected = df.sort_values(['a', 'c']).head(5)
-        tm.assert_frame_equal(result, expected)
-
-    def test_nsmallest_nlargest_duplicate_index(self):
-        # GH 13412
-        df = pd.DataFrame({'a': [1, 2, 3, 4],
-                           'b': [4, 3, 2, 1],
-                           'c': [0, 1, 2, 3]},
-                          index=[0, 0, 1, 1])
-        result = df.nsmallest(4, 'a')
-        expected = df.sort_values('a').head(4)
-        tm.assert_frame_equal(result, expected)
-
-        result = df.nlargest(4, 'a')
-        expected = df.sort_values('a', ascending=False).head(4)
-        tm.assert_frame_equal(result, expected)
-
-        result = df.nsmallest(4, ['a', 'c'])
-        expected = df.sort_values(['a', 'c']).head(4)
-        tm.assert_frame_equal(result, expected)
-
-        result = df.nsmallest(4, ['c', 'a'])
-        expected = df.sort_values(['c', 'a']).head(4)
-        tm.assert_frame_equal(result, expected)
-
-        result = df.nlargest(4, ['a', 'c'])
-        expected = df.sort_values(['a', 'c'], ascending=False).head(4)
-        tm.assert_frame_equal(result, expected)
-
-        result = df.nlargest(4, ['c', 'a'])
-        expected = df.sort_values(['c', 'a'], ascending=False).head(4)
-        tm.assert_frame_equal(result, expected)
-    # ----------------------------------------------------------------------
     # Isin
 
     def test_isin(self):
@@ -1965,3 +1899,111 @@ class TestDataFrameAnalytics(tm.TestCase, TestData):
 
         with tm.assertRaisesRegexp(ValueError, 'aligned'):
             df.dot(df2)
+
+
+@pytest.fixture
+def df_duplicates():
+    return pd.DataFrame({'a': [1, 2, 3, 4, 4],
+                         'b': [1, 1, 1, 1, 1],
+                         'c': [0, 1, 2, 5, 4]},
+                        index=[0, 0, 1, 1, 1])
+
+
+@pytest.fixture
+def df_strings():
+    return pd.DataFrame({'a': np.random.permutation(10),
+                         'b': list(ascii_lowercase[:10]),
+                         'c': np.random.permutation(10).astype('float64')})
+
+
+class TestNLargestNSmallest(object):
+
+    # ----------------------------------------------------------------------
+    # Top / bottom
+    @pytest.mark.parametrize(
+        'n, order',
+        product(range(1, 11),
+                [['a'],
+                 ['c'],
+                 ['a', 'b'],
+                 ['a', 'c'],
+                 ['b', 'a'],
+                 ['b', 'c'],
+                 ['a', 'b', 'c'],
+                 ['c', 'a', 'b'],
+                 ['c', 'b', 'a'],
+                 ['b', 'c', 'a'],
+                 ['b', 'a', 'c'],
+
+                 # dups!
+                 ['b', 'c', 'c'],
+
+                 ]))
+    def test_n(self, df_strings, n, order):
+        # GH10393
+        df = df_strings
+
+        error_msg = (
+            "'b' has dtype: object, cannot use method 'nsmallest' "
+            "with this dtype"
+        )
+        if 'b' in order:
+            with pytest.raises(TypeError) as exception:
+                df.nsmallest(n, order)
+            assert exception.value, error_msg
+        else:
+            result = df.nsmallest(n, order)
+            expected = df.sort_values(order).head(n)
+            tm.assert_frame_equal(result, expected)
+
+        if 'b' in order:
+            with pytest.raises(TypeError) as exception:
+                df.nsmallest(n, order)
+            assert exception.value, error_msg
+        else:
+            result = df.nlargest(n, order)
+            expected = df.sort_values(order, ascending=False).head(n)
+            tm.assert_frame_equal(result, expected)
+
+    def test_n_error(self, df_strings):
+        # b alone raises a TypeError
+        df = df_strings
+        with pytest.raises(TypeError):
+            df.nsmallest(1, 'b')
+        with pytest.raises(TypeError):
+            df.nlargest(1, 'b')
+
+    def test_n_identical_values(self):
+        # GH15297
+        df = pd.DataFrame({'a': [1] * 5, 'b': [1, 2, 3, 4, 5]})
+
+        result = df.nlargest(3, 'a')
+        expected = pd.DataFrame(
+            {'a': [1] * 3, 'b': [1, 2, 3]}, index=[0, 1, 2]
+        )
+        tm.assert_frame_equal(result, expected)
+
+        result = df.nsmallest(3, 'a')
+        expected = pd.DataFrame({'a': [1] * 3, 'b': [1, 2, 3]})
+        tm.assert_frame_equal(result, expected)
+
+    @pytest.mark.parametrize(
+        'n, order',
+        product([1, 2, 3, 4, 5],
+                [['a', 'b', 'c'],
+                 ['c', 'b', 'a'],
+                 ['a'],
+                 ['b'],
+                 ['a', 'b'],
+                 ['c', 'b']]))
+    def test_n_duplicate_index(self, df_duplicates, n, order):
+        # GH 13412
+
+        df = df_duplicates
+        result = df.nsmallest(n, order)
+        expected = df.sort_values(order).head(n)
+        tm.assert_frame_equal(result, expected)
+
+        result = df.nlargest(n, order)
+        expected = df.sort_values(order, ascending=False).head(n)
+        tm.assert_frame_equal(result, expected)

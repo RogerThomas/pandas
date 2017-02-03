@@ -944,14 +944,64 @@ def select_n_frame(frame, columns, n, method, keep):
     -------
     nordered : DataFrame
     """
-    from pandas.core.series import Series
+    from pandas import Int64Index
     if not is_list_like(columns):
         columns = [columns]
     columns = list(columns)
-    ser = getattr(frame[columns[0]], method)(n, keep=keep)
-    if isinstance(ser, Series):
-        ser = ser.to_frame()
-    return ser.merge(frame, on=columns[0], left_index=True)[frame.columns]
+    for column in columns:
+        dtype = frame[column].dtype
+        if not issubclass(dtype.type, (np.integer, np.floating, np.datetime64,
+                                       np.timedelta64)):
+            msg = (
+                "{column!r} has dtype: {dtype}, cannot use method {method!r} "
+                "with this dtype"
+            ).format(column=column, dtype=dtype, method=method)
+            raise TypeError(msg)
+
+    # Below we save and reset the index in case index contains duplicates
+    original_index = frame.index
+    cur_frame = frame = frame.reset_index(drop=True)
+    cur_n = n
+    indexer = Int64Index([])
+    for i, column in enumerate(columns):
+
+        # For each column we apply method to cur_frame[column]. If it is the
+        # last column in columns, or if the values returned are unique in
+        # frame[column] we save this index and break
+        # Otherwise we must save the index of the non duplicated values
+        # and set the next cur_frame to cur_frame filtered on all duplcicated
+        # values (#GH15297)
+        series = cur_frame[column]
+        values = getattr(series, method)(cur_n, keep=keep)
+        is_last_column = len(columns) - 1 == i
+        if is_last_column or len(values.unique()) == sum(series.isin(values)):
+
+            # Last column in columns or values are unique in series => values
+            # is all that matters
+            if method == 'nsmallest':
+                indexer = indexer.append(values.index)
+            else:
+                indexer = values.index.append(indexer)
+            break
+        duplicated_filter = series.duplicated(keep=False)
+        non_duplicated = values[~duplicated_filter]
+        duplicated = values[duplicated_filter]
+        if method == 'nsmallest':
+            indexer = indexer.append(non_duplicated.index)
+        else:
+            indexer = non_duplicated.index.append(indexer)
+
+        # Must set cur frame to include all duplicated values to consider for
+        # the next column, we also can reduce cur_n by the current length of
+        # the indexer
+        cur_frame = cur_frame[series.isin(duplicated)]
+        cur_n = n - len(indexer)
+
+    frame = frame.take(indexer)
+
+    # Restore the index on frame
+    frame.index = original_index.take(indexer)
+    return frame
 
 
 def _finalize_nsmallest(arr, kth_val, n, keep, narr):

@@ -1381,80 +1381,6 @@ class TestSeriesAnalytics(TestData, tm.TestCase):
         self.assertFalse(s.is_monotonic)
         self.assertTrue(s.is_monotonic_decreasing)
 
-    def test_nsmallest_nlargest(self):
-        # float, int, datetime64 (use i8), timedelts64 (same),
-        # object that are numbers, object that are strings
-
-        base = [3, 2, 1, 2, 5]
-
-        s_list = [
-            Series(base, dtype='int8'),
-            Series(base, dtype='int16'),
-            Series(base, dtype='int32'),
-            Series(base, dtype='int64'),
-            Series(base, dtype='float32'),
-            Series(base, dtype='float64'),
-            Series(base, dtype='uint8'),
-            Series(base, dtype='uint16'),
-            Series(base, dtype='uint32'),
-            Series(base, dtype='uint64'),
-            Series(base).astype('timedelta64[ns]'),
-            Series(pd.to_datetime(['2003', '2002', '2001', '2002', '2005'])),
-        ]
-
-        raising = [
-            Series([3., 2, 1, 2, '5'], dtype='object'),
-            Series([3., 2, 1, 2, 5], dtype='object'),
-            # not supported on some archs
-            # Series([3., 2, 1, 2, 5], dtype='complex256'),
-            Series([3., 2, 1, 2, 5], dtype='complex128'),
-        ]
-
-        for r in raising:
-            dt = r.dtype
-            msg = "Cannot use method 'n(larg|small)est' with dtype %s" % dt
-            args = 2, len(r), 0, -1
-            methods = r.nlargest, r.nsmallest
-            for method, arg in product(methods, args):
-                with tm.assertRaisesRegexp(TypeError, msg):
-                    method(arg)
-
-        for s in s_list:
-
-            assert_series_equal(s.nsmallest(2), s.iloc[[2, 1]])
-            assert_series_equal(s.nsmallest(2, keep='last'), s.iloc[[2, 3]])
-
-            empty = s.iloc[0:0]
-            assert_series_equal(s.nsmallest(0), empty)
-            assert_series_equal(s.nsmallest(-1), empty)
-            assert_series_equal(s.nlargest(0), empty)
-            assert_series_equal(s.nlargest(-1), empty)
-
-            assert_series_equal(s.nsmallest(len(s)), s.sort_values())
-            assert_series_equal(s.nsmallest(len(s) + 1), s.sort_values())
-            assert_series_equal(s.nlargest(len(s)), s.iloc[[4, 0, 1, 3, 2]])
-            assert_series_equal(s.nlargest(len(s) + 1),
-                                s.iloc[[4, 0, 1, 3, 2]])
-
-        s = Series([3., np.nan, 1, 2, 5])
-        assert_series_equal(s.nlargest(), s.iloc[[4, 0, 3, 2]])
-        assert_series_equal(s.nsmallest(), s.iloc[[2, 3, 0, 4]])
-
-        msg = 'keep must be either "first", "last"'
-        with tm.assertRaisesRegexp(ValueError, msg):
-            s.nsmallest(keep='invalid')
-        with tm.assertRaisesRegexp(ValueError, msg):
-            s.nlargest(keep='invalid')
-
-        # GH 13412
-        s = Series([1, 4, 3, 2], index=[0, 0, 1, 1])
-        result = s.nlargest(3)
-        expected = s.sort_values(ascending=False).head(3)
-        assert_series_equal(result, expected)
-        result = s.nsmallest(3)
-        expected = s.sort_values().head(3)
-        assert_series_equal(result, expected)
-
     def test_sort_index_level(self):
         mi = MultiIndex.from_tuples([[1, 1, 3], [1, 1, 1]], names=list('ABC'))
         s = Series([1, 2], mi)
@@ -1729,3 +1655,100 @@ class TestSeriesAnalytics(TestData, tm.TestCase):
                         index=exp_idx, name='xxx')
         tm.assert_series_equal(s.value_counts(normalize=True), exp)
         tm.assert_series_equal(idx.value_counts(normalize=True), exp)
+
+
+base = [3, 2, 1, 2, 5]
+
+
+class TestNLargestNSmallest(object):
+
+    @pytest.mark.parametrize(
+        "r", [Series([3., 2, 1, 2, '5'], dtype='object'),
+              Series([3., 2, 1, 2, 5], dtype='object'),
+              # not supported on some archs
+              # Series([3., 2, 1, 2, 5], dtype='complex256'),
+              Series([3., 2, 1, 2, 5], dtype='complex128')])
+    def test_error(self, r):
+        dt = r.dtype
+        msg = "Cannot use method 'n(larg|small)est' with dtype %s" % dt
+        args = 2, len(r), 0, -1
+        methods = r.nlargest, r.nsmallest
+        for method, arg in product(methods, args):
+            with tm.assertRaisesRegexp(TypeError, msg):
+                method(arg)
+
+    @pytest.mark.parametrize(
+        "s", [Series(base, dtype='int8'),
+              Series(base, dtype='int16'),
+              Series(base, dtype='int32'),
+              Series(base, dtype='int64'),
+              Series(base, dtype='float32'),
+              Series(base, dtype='float64'),
+              Series(base, dtype='uint8'),
+              Series(base, dtype='uint16'),
+              Series(base, dtype='uint32'),
+              Series(base, dtype='uint64'),
+              Series(base).astype('timedelta64[ns]'),
+              Series(pd.to_datetime(['2003', '2002',
+                                     '2001', '2002',
+                                     '2005']))])
+    def test_nsmallest_nlargest(self, s):
+        # float, int, datetime64 (use i8), timedelts64 (same),
+        # object that are numbers, object that are strings
+
+        assert_series_equal(s.nsmallest(2), s.iloc[[2, 1]])
+        assert_series_equal(s.nsmallest(2, keep='last'), s.iloc[[2, 3]])
+
+        empty = s.iloc[0:0]
+        assert_series_equal(s.nsmallest(0), empty)
+        assert_series_equal(s.nsmallest(-1), empty)
+        assert_series_equal(s.nlargest(0), empty)
+        assert_series_equal(s.nlargest(-1), empty)
+
+        assert_series_equal(s.nsmallest(len(s)), s.sort_values())
+        assert_series_equal(s.nsmallest(len(s) + 1), s.sort_values())
+        assert_series_equal(s.nlargest(len(s)), s.iloc[[4, 0, 1, 3, 2]])
+        assert_series_equal(s.nlargest(len(s) + 1),
+                            s.iloc[[4, 0, 1, 3, 2]])
+
+    def test_misc(self):
+
+        s = Series([3., np.nan, 1, 2, 5])
+        assert_series_equal(s.nlargest(), s.iloc[[4, 0, 3, 2]])
+        assert_series_equal(s.nsmallest(), s.iloc[[2, 3, 0, 4]])
+
+        msg = 'keep must be either "first", "last"'
+        with tm.assertRaisesRegexp(ValueError, msg):
+            s.nsmallest(keep='invalid')
+        with tm.assertRaisesRegexp(ValueError, msg):
+            s.nlargest(keep='invalid')
+
+        # GH 15297
+        s = Series([1] * 5, index=[1, 2, 3, 4, 5])
+        expected_first = Series([1] * 3, index=[1, 2, 3])
+        expected_last = Series([1] * 3, index=[5, 4, 3])
+
+        result = s.nsmallest(3)
+        assert_series_equal(result, expected_first)
+
+        result = s.nsmallest(3, keep='last')
+        assert_series_equal(result, expected_last)
+
+        result = s.nlargest(3)
+        assert_series_equal(result, expected_first)
+
+        result = s.nlargest(3, keep='last')
+        assert_series_equal(result, expected_last)
+
+    @pytest.mark.parametrize('n', range(1, 5))
+    def test_n(self, n):
+
+        # GH 13412
+        s = Series([1, 4, 3, 2], index=[0, 0, 1, 1])
+        result = s.nlargest(n)
+        expected = s.sort_values(ascending=False).head(n)
+        assert_series_equal(result, expected)
+
+        result = s.nsmallest(n)
+        expected = s.sort_values().head(n)
+        assert_series_equal(result, expected)
