@@ -1595,6 +1595,16 @@ class TestSeriesAnalytics(TestData, tm.TestCase):
         expected = s.sort_values().head(3)
         assert_series_equal(result, expected)
 
+        # GH 15297
+        s = Series([1] * 5, index=[1, 2, 3, 4, 5])
+        expected = Series([1] * 3, index=[1, 2, 3])
+
+        result = s.nsmallest(3)
+        assert_series_equal(result, expected)
+
+        result = s.nlargest(3)
+        assert_series_equal(result, expected)
+
     def test_sort_index_level(self):
         mi = MultiIndex.from_tuples([[1, 1, 3], [1, 1, 1]], names=list('ABC'))
         s = Series([1, 2], mi)
