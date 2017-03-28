@@ -7,8 +7,10 @@ import re
 
 import numpy as np
 
-from pandas.types.common import _ensure_platform_int, is_list_like
-from pandas.types.cast import _maybe_promote
+from pandas.types.common import (_ensure_platform_int,
+                                 is_list_like, is_bool_dtype,
+                                 needs_i8_conversion)
+from pandas.types.cast import maybe_promote
 from pandas.types.missing import notnull
 import pandas.types.concat as _concat
 
@@ -17,13 +19,14 @@ from pandas.core.frame import DataFrame
 
 from pandas.core.sparse import SparseDataFrame, SparseSeries
 from pandas.sparse.array import SparseArray
-from pandas._sparse import IntIndex
+from pandas.sparse.libsparse import IntIndex
 
 from pandas.core.categorical import Categorical, _factorize_from_iterable
-from pandas.core.groupby import get_group_index, _compress_group_index
+from pandas.core.sorting import (get_group_index, compress_group_index,
+                                 decons_obs_group_ids)
 
 import pandas.core.algorithms as algos
-import pandas.algos as _algos
+from pandas._libs import algos as _algos, reshape as _reshape
 
 from pandas.core.index import MultiIndex, _get_na_value
 
@@ -156,7 +159,7 @@ class _Unstacker(object):
 
         # filter out missing levels
         if values.shape[1] > 0:
-            col_inds, obs_ids = _compress_group_index(self.sorted_labels[-1])
+            col_inds, obs_ids = compress_group_index(self.sorted_labels[-1])
             # rare case, level values not observed
             if len(obs_ids) < self.full_shape[1]:
                 inds = (value_mask.sum(0) > 0).nonzero()[0]
@@ -181,25 +184,60 @@ class _Unstacker(object):
         stride = values.shape[1]
         result_width = width * stride
         result_shape = (length, result_width)
+        mask = self.mask
+        mask_all = mask.all()
+
+        # we can simply reshape if we don't have a mask
+        if mask_all and len(values):
+            new_values = (self.sorted_values
+                              .reshape(length, width, stride)
+                              .swapaxes(1, 2)
+                              .reshape(result_shape)
+                          )
+            new_mask = np.ones(result_shape, dtype=bool)
+            return new_values, new_mask
 
         # if our mask is all True, then we can use our existing dtype
-        if self.mask.all():
+        if mask_all:
             dtype = values.dtype
             new_values = np.empty(result_shape, dtype=dtype)
         else:
-            dtype, fill_value = _maybe_promote(values.dtype, self.fill_value)
+            dtype, fill_value = maybe_promote(values.dtype, self.fill_value)
             new_values = np.empty(result_shape, dtype=dtype)
             new_values.fill(fill_value)
 
         new_mask = np.zeros(result_shape, dtype=bool)
 
-        # is there a simpler / faster way of doing this?
-        for i in range(values.shape[1]):
-            chunk = new_values[:, i * width:(i + 1) * width]
-            mask_chunk = new_mask[:, i * width:(i + 1) * width]
+        name = np.dtype(dtype).name
+        sorted_values = self.sorted_values
 
-            chunk.flat[self.mask] = self.sorted_values[:, i]
-            mask_chunk.flat[self.mask] = True
+        # we need to convert to a basic dtype
+        # and possibly coerce an input to our output dtype
+        # e.g. ints -> floats
+        if needs_i8_conversion(values):
+            sorted_values = sorted_values.view('i8')
+            new_values = new_values.view('i8')
+            name = 'int64'
+        elif is_bool_dtype(values):
+            sorted_values = sorted_values.astype('object')
+            new_values = new_values.astype('object')
+            name = 'object'
+        else:
+            sorted_values = sorted_values.astype(name, copy=False)
+
+        # fill in our values & mask
+        f = getattr(_reshape, "unstack_{}".format(name))
+        f(sorted_values,
+          mask.view('u1'),
+          stride,
+          length,
+          width,
+          new_values,
+          new_mask.view('u1'))
+
+        # reconstruct dtype if needed
+        if needs_i8_conversion(values):
+            new_values = new_values.view(values.dtype)
 
         return new_values, new_mask
 
@@ -245,8 +283,6 @@ class _Unstacker(object):
 
 
 def _unstack_multiple(data, clocs):
-    from pandas.core.groupby import decons_obs_group_ids
-
     if len(clocs) == 0:
         return data
 
@@ -268,7 +304,7 @@ def _unstack_multiple(data, clocs):
     shape = [len(x) for x in clevels]
     group_index = get_group_index(clabels, shape, sort=False, xnull=False)
 
-    comp_ids, obs_ids = _compress_group_index(group_index, sort=False)
+    comp_ids, obs_ids = compress_group_index(group_index, sort=False)
     recons_labels = decons_obs_group_ids(comp_ids, obs_ids, shape, clabels,
                                          xnull=False)
 
@@ -459,10 +495,8 @@ def _unstack_frame(obj, level, fill_value=None):
 
 
 def get_compressed_ids(labels, sizes):
-    from pandas.core.groupby import get_group_index
-
     ids = get_group_index(labels, sizes, sort=True, xnull=False)
-    return _compress_group_index(ids, sort=True)
+    return compress_group_index(ids, sort=True)
 
 
 def stack(frame, level=-1, dropna=True):
@@ -761,16 +795,26 @@ def melt(frame, id_vars=None, value_vars=None, var_name=None,
     """
     # TODO: what about the existing index?
     if id_vars is not None:
-        if not isinstance(id_vars, (tuple, list, np.ndarray)):
+        if not is_list_like(id_vars):
             id_vars = [id_vars]
+        elif (isinstance(frame.columns, MultiIndex) and
+              not isinstance(id_vars, list)):
+            raise ValueError('id_vars must be a list of tuples when columns'
+                             ' are a MultiIndex')
         else:
             id_vars = list(id_vars)
     else:
         id_vars = []
 
     if value_vars is not None:
-        if not isinstance(value_vars, (tuple, list, np.ndarray)):
+        if not is_list_like(value_vars):
             value_vars = [value_vars]
+        elif (isinstance(frame.columns, MultiIndex) and
+              not isinstance(value_vars, list)):
+            raise ValueError('value_vars must be a list of tuples when'
+                             ' columns are a MultiIndex')
+        else:
+            value_vars = list(value_vars)
         frame = frame.loc[:, id_vars + value_vars]
     else:
         frame = frame.copy()
@@ -804,7 +848,8 @@ def melt(frame, id_vars=None, value_vars=None, var_name=None,
     mdata[value_name] = frame.values.ravel('F')
     for i, col in enumerate(var_name):
         # asanyarray will keep the columns as an Index
-        mdata[col] = np.asanyarray(frame.columns.get_level_values(i)).repeat(N)
+        mdata[col] = np.asanyarray(frame.columns
+                                   ._get_level_values(i)).repeat(N)
 
     return DataFrame(mdata, columns=mcolumns)
 
@@ -1194,7 +1239,7 @@ def get_dummies(data, prefix=None, prefix_sep='_', dummy_na=False,
     --------
     Series.str.get_dummies
     """
-    from pandas.tools.merge import concat
+    from pandas.tools.concat import concat
     from itertools import cycle
 
     if isinstance(data, DataFrame):
@@ -1263,7 +1308,7 @@ def _get_dummies_1d(data, prefix, prefix_sep='_', dummy_na=False,
         if not sparse:
             return DataFrame(index=index)
         else:
-            return SparseDataFrame(index=index)
+            return SparseDataFrame(index=index, default_fill_value=0)
 
     # if all NaN
     if not dummy_na and len(levels) == 0:
@@ -1312,6 +1357,7 @@ def _get_dummies_1d(data, prefix, prefix_sep='_', dummy_na=False,
             sparse_series[col] = SparseSeries(data=sarr, index=index)
 
         out = SparseDataFrame(sparse_series, index=index, columns=dummy_cols,
+                              default_fill_value=0,
                               dtype=np.uint8)
         return out
 

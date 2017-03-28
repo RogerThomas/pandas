@@ -9,11 +9,13 @@ import numpy.ma as ma
 import pandas as pd
 
 from pandas.types.common import is_categorical_dtype, is_datetime64tz_dtype
-from pandas import Index, Series, isnull, date_range, period_range
+from pandas import (Index, Series, isnull, date_range,
+                    period_range, NaT)
 from pandas.core.index import MultiIndex
 from pandas.tseries.index import Timestamp, DatetimeIndex
 
-import pandas.lib as lib
+from pandas._libs import lib
+from pandas._libs.tslib import iNaT
 
 from pandas.compat import lrange, range, zip, OrderedDict, long
 from pandas import compat
@@ -24,8 +26,6 @@ from .common import TestData
 
 
 class TestSeriesConstructors(TestData, tm.TestCase):
-
-    _multiprocess_can_split_ = True
 
     def test_scalar_conversion(self):
 
@@ -38,22 +38,11 @@ class TestSeriesConstructors(TestData, tm.TestCase):
         self.assertEqual(int(Series([1.])), 1)
         self.assertEqual(long(Series([1.])), 1)
 
-    def test_TimeSeries_deprecation(self):
-
-        # deprecation TimeSeries, #10890
-        with tm.assert_produces_warning(FutureWarning):
-            pd.TimeSeries(1, index=date_range('20130101', periods=3))
-
     def test_constructor(self):
-        # Recognize TimeSeries
-        with tm.assert_produces_warning(FutureWarning):
-            self.assertTrue(self.ts.is_time_series)
         self.assertTrue(self.ts.index.is_all_dates)
 
         # Pass in Series
         derived = Series(self.ts)
-        with tm.assert_produces_warning(FutureWarning):
-            self.assertTrue(derived.is_time_series)
         self.assertTrue(derived.index.is_all_dates)
 
         self.assertTrue(tm.equalContents(derived.index, self.ts.index))
@@ -65,11 +54,7 @@ class TestSeriesConstructors(TestData, tm.TestCase):
         self.assertEqual(mixed.dtype, np.object_)
         self.assertIs(mixed[1], np.NaN)
 
-        with tm.assert_produces_warning(FutureWarning):
-            self.assertFalse(self.empty.is_time_series)
         self.assertFalse(self.empty.index.is_all_dates)
-        with tm.assert_produces_warning(FutureWarning):
-            self.assertFalse(Series({}).is_time_series)
         self.assertFalse(Series({}).index.is_all_dates)
         self.assertRaises(Exception, Series, np.random.randn(3, 3),
                           index=np.arange(3))
@@ -214,17 +199,16 @@ class TestSeriesConstructors(TestData, tm.TestCase):
         expected = Series([True, True, False], index=index, dtype=bool)
         assert_series_equal(result, expected)
 
-        from pandas import tslib
         data = ma.masked_all((3, ), dtype='M8[ns]')
         result = Series(data)
-        expected = Series([tslib.iNaT, tslib.iNaT, tslib.iNaT], dtype='M8[ns]')
+        expected = Series([iNaT, iNaT, iNaT], dtype='M8[ns]')
         assert_series_equal(result, expected)
 
         data[0] = datetime(2001, 1, 1)
         data[2] = datetime(2001, 1, 3)
         index = ['a', 'b', 'c']
         result = Series(data, index=index)
-        expected = Series([datetime(2001, 1, 1), tslib.iNaT,
+        expected = Series([datetime(2001, 1, 1), iNaT,
                            datetime(2001, 1, 3)], index=index, dtype='M8[ns]')
         assert_series_equal(result, expected)
 
@@ -233,6 +217,13 @@ class TestSeriesConstructors(TestData, tm.TestCase):
         expected = Series([datetime(2001, 1, 1), datetime(2001, 1, 2),
                            datetime(2001, 1, 3)], index=index, dtype='M8[ns]')
         assert_series_equal(result, expected)
+
+    def test_series_ctor_plus_datetimeindex(self):
+        rng = date_range('20090415', '20090519', freq='B')
+        data = dict((k, 1) for k in rng)
+
+        result = Series(data, index=rng)
+        self.assertIs(result.index, rng)
 
     def test_constructor_default_index(self):
         s = Series([0, 1, 2])
@@ -337,20 +328,19 @@ class TestSeriesConstructors(TestData, tm.TestCase):
         self.assertTrue(result.dtype == object)
 
     def test_constructor_dtype_datetime64(self):
-        import pandas.tslib as tslib
 
-        s = Series(tslib.iNaT, dtype='M8[ns]', index=lrange(5))
+        s = Series(iNaT, dtype='M8[ns]', index=lrange(5))
         self.assertTrue(isnull(s).all())
 
         # in theory this should be all nulls, but since
         # we are not specifying a dtype is ambiguous
-        s = Series(tslib.iNaT, index=lrange(5))
+        s = Series(iNaT, index=lrange(5))
         self.assertFalse(isnull(s).all())
 
         s = Series(nan, dtype='M8[ns]', index=lrange(5))
         self.assertTrue(isnull(s).all())
 
-        s = Series([datetime(2001, 1, 2, 0, 0), tslib.iNaT], dtype='M8[ns]')
+        s = Series([datetime(2001, 1, 2, 0, 0), iNaT], dtype='M8[ns]')
         self.assertTrue(isnull(s[1]))
         self.assertEqual(s.dtype, 'M8[ns]')
 
@@ -742,8 +732,7 @@ class TestSeriesConstructors(TestData, tm.TestCase):
         self.assertEqual(td.dtype, 'timedelta64[ns]')
 
         # mixed with NaT
-        from pandas import tslib
-        td = Series([timedelta(days=1), tslib.NaT], dtype='m8[ns]')
+        td = Series([timedelta(days=1), NaT], dtype='m8[ns]')
         self.assertEqual(td.dtype, 'timedelta64[ns]')
 
         td = Series([timedelta(days=1), np.nan], dtype='m8[ns]')
@@ -754,11 +743,11 @@ class TestSeriesConstructors(TestData, tm.TestCase):
 
         # improved inference
         # GH5689
-        td = Series([np.timedelta64(300000000), pd.NaT])
+        td = Series([np.timedelta64(300000000), NaT])
         self.assertEqual(td.dtype, 'timedelta64[ns]')
 
         # because iNaT is int, not coerced to timedelta
-        td = Series([np.timedelta64(300000000), tslib.iNaT])
+        td = Series([np.timedelta64(300000000), iNaT])
         self.assertEqual(td.dtype, 'object')
 
         td = Series([np.timedelta64(300000000), np.nan])
@@ -800,6 +789,21 @@ class TestSeriesConstructors(TestData, tm.TestCase):
         s = Series([pd.NaT, np.nan, '1 Day'])
         self.assertEqual(s.dtype, 'timedelta64[ns]')
 
+    def test_NaT_scalar(self):
+        series = Series([0, 1000, 2000, iNaT], dtype='M8[ns]')
+
+        val = series[3]
+        self.assertTrue(isnull(val))
+
+        series[2] = val
+        self.assertTrue(isnull(series[2]))
+
+    def test_NaT_cast(self):
+        # GH10747
+        result = Series([np.nan]).astype('M8[ns]')
+        expected = Series([NaT])
+        assert_series_equal(result, expected)
+
     def test_constructor_name_hashable(self):
         for n in [777, 777., 'name', datetime(2001, 11, 11), (1, ), u"\u05D0"]:
             for data in [[1, 2, 3], np.ones(3), {'a': 0, 'b': 1}]:
@@ -810,3 +814,20 @@ class TestSeriesConstructors(TestData, tm.TestCase):
         for n in [['name_list'], np.ones(2), {1: 2}]:
             for data in [['name_list'], np.ones(2), {1: 2}]:
                 self.assertRaises(TypeError, Series, data, name=n)
+
+    def test_auto_conversion(self):
+        series = Series(list(date_range('1/1/2000', periods=10)))
+        self.assertEqual(series.dtype, 'M8[ns]')
+
+    def test_constructor_cant_cast_datetime64(self):
+        msg = "Cannot cast datetime64 to "
+        with tm.assertRaisesRegexp(TypeError, msg):
+            Series(date_range('1/1/2000', periods=10), dtype=float)
+
+        with tm.assertRaisesRegexp(TypeError, msg):
+            Series(date_range('1/1/2000', periods=10), dtype=int)
+
+    def test_constructor_cast_object(self):
+        s = Series(date_range('1/1/2000', periods=10), dtype=object)
+        exp = Series(date_range('1/1/2000', periods=10))
+        tm.assert_series_equal(s, exp)

@@ -3,16 +3,15 @@
 from datetime import datetime
 from pandas.compat import range, PY3
 
-import nose
 import numpy as np
 
-from pandas import (date_range, Series, Index, Float64Index,
+from pandas import (date_range, notnull, Series, Index, Float64Index,
                     Int64Index, UInt64Index, RangeIndex)
 
 import pandas.util.testing as tm
 
 import pandas as pd
-from pandas.lib import Timestamp
+from pandas._libs.lib import Timestamp
 
 from pandas.tests.indexes.common import Base
 
@@ -177,7 +176,6 @@ class Numeric(Base):
 
 class TestFloat64Index(Numeric, tm.TestCase):
     _holder = Float64Index
-    _multiprocess_can_split_ = True
 
     def setUp(self):
         self.indices = dict(mixed=Float64Index([1.5, 2, 3, 4, 5]),
@@ -625,7 +623,6 @@ class NumericInt(Numeric):
 class TestInt64Index(NumericInt, tm.TestCase):
     _dtype = 'int64'
     _holder = Int64Index
-    _multiprocess_can_split_ = True
 
     def setUp(self):
         self.indices = dict(index=Int64Index(np.arange(0, 20, 2)))
@@ -688,6 +685,31 @@ class TestInt64Index(NumericInt, tm.TestCase):
         # but not if explicit dtype passed
         arr = Index([1, 2, 3, 4], dtype=object)
         tm.assertIsInstance(arr, Index)
+
+    def test_where(self):
+        i = self.create_index()
+        result = i.where(notnull(i))
+        expected = i
+        tm.assert_index_equal(result, expected)
+
+        _nan = i._na_value
+        cond = [False] + [True] * len(i[1:])
+        expected = pd.Index([_nan] + i[1:].tolist())
+
+        result = i.where(cond)
+        tm.assert_index_equal(result, expected)
+
+    def test_where_array_like(self):
+        i = self.create_index()
+
+        _nan = i._na_value
+        cond = [False] + [True] * (len(i) - 1)
+        klasses = [list, tuple, np.array, pd.Series]
+        expected = pd.Index([_nan] + i[1:].tolist())
+
+        for klass in klasses:
+            result = i.where(klass(cond))
+            tm.assert_index_equal(result, expected)
 
     def test_get_indexer(self):
         target = Int64Index(np.arange(10))
@@ -896,7 +918,6 @@ class TestUInt64Index(NumericInt, tm.TestCase):
 
     _dtype = 'uint64'
     _holder = UInt64Index
-    _multiprocess_can_split_ = True
 
     def setUp(self):
         self.indices = dict(index=UInt64Index([2**63, 2**63 + 10, 2**63 + 15,
@@ -1144,8 +1165,3 @@ class TestUInt64Index(NumericInt, tm.TestCase):
         self.assert_index_equal(res, eres)
         tm.assert_numpy_array_equal(lidx, elidx)
         tm.assert_numpy_array_equal(ridx, eridx)
-
-
-if __name__ == '__main__':
-    nose.runmodule(argv=[__file__, '-vvs', '-x', '--pdb', '--pdb-failure'],
-                   exit=False)

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-import nose
+import pytest
 import numpy as np
 
 import pandas as pd
@@ -14,8 +14,6 @@ import pandas.compat as compat
 
 
 class CoercionBase(object):
-
-    _multiprocess_can_split_ = True
 
     klasses = ['index', 'series']
     dtypes = ['object', 'int64', 'float64', 'complex128', 'bool',
@@ -1155,11 +1153,26 @@ class TestReplaceSeriesCoercion(CoercionBase, tm.TestCase):
         self.rep['float64'] = [1.1, 2.2]
         self.rep['complex128'] = [1 + 1j, 2 + 2j]
         self.rep['bool'] = [True, False]
+        self.rep['datetime64[ns]'] = [pd.Timestamp('2011-01-01'),
+                                      pd.Timestamp('2011-01-03')]
+
+        for tz in ['UTC', 'US/Eastern']:
+            # to test tz => different tz replacement
+            key = 'datetime64[ns, {0}]'.format(tz)
+            self.rep[key] = [pd.Timestamp('2011-01-01', tz=tz),
+                             pd.Timestamp('2011-01-03', tz=tz)]
+
+        self.rep['timedelta64[ns]'] = [pd.Timedelta('1 day'),
+                                       pd.Timedelta('2 day')]
 
     def _assert_replace_conversion(self, from_key, to_key, how):
         index = pd.Index([3, 4], name='xxx')
         obj = pd.Series(self.rep[from_key], index=index, name='yyy')
         self.assertEqual(obj.dtype, from_key)
+
+        if (from_key.startswith('datetime') and to_key.startswith('datetime')):
+            # different tz, currently mask_missing raises SystemError
+            return
 
         if how == 'dict':
             replacer = dict(zip(self.rep[from_key], self.rep[to_key]))
@@ -1170,29 +1183,14 @@ class TestReplaceSeriesCoercion(CoercionBase, tm.TestCase):
 
         result = obj.replace(replacer)
 
-        # buggy on windows for bool/int64
-        if (from_key == 'bool' and
-                to_key == 'int64' and
-                tm.is_platform_windows()):
-            raise nose.SkipTest("windows platform buggy: {0} -> {1}".format
-                                (from_key, to_key))
-
-        if ((from_key == 'float64' and
-             to_key in ('bool', 'int64')) or
-
+        if ((from_key == 'float64' and to_key in ('int64')) or
             (from_key == 'complex128' and
-             to_key in ('bool', 'int64', 'float64')) or
-
-            (from_key == 'int64' and
-             to_key in ('bool')) or
-
-            # TODO_GH12747 The result must be int?
-           (from_key == 'bool' and to_key == 'int64')):
+             to_key in ('int64', 'float64'))):
 
             # buggy on 32-bit
             if tm.is_platform_32bit():
-                raise nose.SkipTest("32-bit platform buggy: {0} -> {1}".format
-                                    (from_key, to_key))
+                pytest.skip("32-bit platform buggy: {0} -> {1}".format
+                            (from_key, to_key))
 
             # Expected: do not downcast by replacement
             exp = pd.Series(self.rep[to_key], index=index,
@@ -1245,18 +1243,36 @@ class TestReplaceSeriesCoercion(CoercionBase, tm.TestCase):
 
             if compat.PY3:
                 # doesn't work in PY3, though ...dict_from_bool works fine
-                raise nose.SkipTest("doesn't work as in PY3")
+                pytest.skip("doesn't work as in PY3")
 
             self._assert_replace_conversion(from_key, to_key, how='series')
 
     def test_replace_series_datetime64(self):
-        pass
+        from_key = 'datetime64[ns]'
+        for to_key in self.rep:
+            self._assert_replace_conversion(from_key, to_key, how='dict')
+
+        from_key = 'datetime64[ns]'
+        for to_key in self.rep:
+            self._assert_replace_conversion(from_key, to_key, how='series')
 
     def test_replace_series_datetime64tz(self):
-        pass
+        from_key = 'datetime64[ns, US/Eastern]'
+        for to_key in self.rep:
+            self._assert_replace_conversion(from_key, to_key, how='dict')
+
+        from_key = 'datetime64[ns, US/Eastern]'
+        for to_key in self.rep:
+            self._assert_replace_conversion(from_key, to_key, how='series')
 
     def test_replace_series_timedelta64(self):
-        pass
+        from_key = 'timedelta64[ns]'
+        for to_key in self.rep:
+            self._assert_replace_conversion(from_key, to_key, how='dict')
+
+        from_key = 'timedelta64[ns]'
+        for to_key in self.rep:
+            self._assert_replace_conversion(from_key, to_key, how='series')
 
     def test_replace_series_period(self):
         pass

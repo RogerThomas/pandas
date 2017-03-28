@@ -2,7 +2,8 @@
 # pylint: disable-msg=E1101,W0612
 
 from operator import methodcaller
-import nose
+from copy import copy, deepcopy
+import pytest
 import numpy as np
 from numpy import nan
 import pandas as pd
@@ -32,8 +33,6 @@ import pandas.util.testing as tm
 
 
 class Generic(object):
-
-    _multiprocess_can_split_ = True
 
     def setUp(self):
         pass
@@ -369,7 +368,7 @@ class Generic(object):
             try:
                 o.head()
             except (NotImplementedError):
-                raise nose.SkipTest('not implemented on {0}'.format(
+                pytest.skip('not implemented on {0}'.format(
                     o.__class__.__name__))
 
             self._compare(o.head(), o.iloc[:5])
@@ -659,7 +658,7 @@ class Generic(object):
                 super(DataFrame, df).sort_index(inplace=value)
 
             with self.assertRaises(ValueError):
-                super(DataFrame, df).consolidate(inplace=value)
+                super(DataFrame, df)._consolidate(inplace=value)
 
             with self.assertRaises(ValueError):
                 super(DataFrame, df).fillna(value=0, inplace=value)
@@ -676,6 +675,18 @@ class Generic(object):
 
             with self.assertRaises(ValueError):
                 super(DataFrame, df).mask(cond=df.a > 2, inplace=value)
+
+    def test_copy_and_deepcopy(self):
+        # GH 15444
+        for shape in [0, 1, 2]:
+            obj = self._construct(shape)
+            for func in [copy,
+                         deepcopy,
+                         lambda x: x.copy(deep=False),
+                         lambda x: x.copy(deep=True)]:
+                obj_copy = func(obj)
+                self.assertIsNot(obj_copy, obj)
+                self._compare(obj_copy, obj)
 
 
 class TestSeries(tm.TestCase, Generic):
@@ -1269,10 +1280,10 @@ class TestDataFrame(tm.TestCase, Generic):
                         'numD': np.arange(24.) + .5,
                         'ts': tm.makeTimeSeries()[:24].index})
         G = df.groupby('catA')
-        self.assertTrue(G.describe(include=['number']).shape == (16, 2))
-        self.assertTrue(G.describe(include=['number', 'object']).shape == (22,
-                                                                           3))
-        self.assertTrue(G.describe(include='all').shape == (26, 4))
+        self.assertTrue(G.describe(include=['number']).shape == (2, 16))
+        self.assertTrue(G.describe(include=['number', 'object']).shape == (2,
+                                                                           33))
+        self.assertTrue(G.describe(include='all').shape == (2, 52))
 
     def test_describe_multi_index_df_column_names(self):
         """ Test that column names persist after the describe operation."""
@@ -1541,6 +1552,14 @@ class TestDataFrame(tm.TestCase, Generic):
                            expected,
                            check_index_type=False)
 
+    def test_deepcopy_empty(self):
+        # This test covers empty frame copying with non-empty column sets
+        # as reported in issue GH15370
+        empty_frame = DataFrame(data=[], index=[], columns=['A'])
+        empty_frame_copy = deepcopy(empty_frame)
+
+        self._compare(empty_frame_copy, empty_frame)
+
 
 class TestPanel(tm.TestCase, Generic):
     _typ = Panel
@@ -1569,7 +1588,10 @@ class TestPanel4D(tm.TestCase, Generic):
     _comparator = lambda self, x, y: assert_panel4d_equal(x, y, by_blocks=True)
 
     def test_sample(self):
-        raise nose.SkipTest("sample on Panel4D")
+        pytest.skip("sample on Panel4D")
+
+    def test_copy_and_deepcopy(self):
+        pytest.skip("copy_and_deepcopy on Panel4D")
 
     def test_to_xarray(self):
 
@@ -1589,6 +1611,7 @@ class TestPanel4D(tm.TestCase, Generic):
 
             # non-convertible
             self.assertRaises(ValueError, lambda: result.to_pandas())
+
 
 # run all the tests, but wrap each in a warning catcher
 for t in ['test_rename', 'test_rename_axis', 'test_get_numeric_data',
@@ -1772,16 +1795,26 @@ class TestNDFrame(tm.TestCase):
         [tm.assert_series_equal(empty_series, higher_dim.squeeze())
          for higher_dim in [empty_series, empty_frame, empty_panel]]
 
+        # axis argument
+        df = tm.makeTimeDataFrame(nper=1).iloc[:, :1]
+        tm.assert_equal(df.shape, (1, 1))
+        tm.assert_series_equal(df.squeeze(axis=0), df.iloc[0])
+        tm.assert_series_equal(df.squeeze(axis='index'), df.iloc[0])
+        tm.assert_series_equal(df.squeeze(axis=1), df.iloc[:, 0])
+        tm.assert_series_equal(df.squeeze(axis='columns'), df.iloc[:, 0])
+        tm.assert_equal(df.squeeze(), df.iloc[0, 0])
+        tm.assertRaises(ValueError, df.squeeze, axis=2)
+        tm.assertRaises(ValueError, df.squeeze, axis='x')
+
+        df = tm.makeTimeDataFrame(3)
+        tm.assert_frame_equal(df.squeeze(axis=0), df)
+
     def test_numpy_squeeze(self):
         s = tm.makeFloatSeries()
         tm.assert_series_equal(np.squeeze(s), s)
 
         df = tm.makeTimeDataFrame().reindex(columns=['A'])
         tm.assert_series_equal(np.squeeze(df), df['A'])
-
-        msg = "the 'axis' parameter is not supported"
-        tm.assertRaisesRegexp(ValueError, msg,
-                              np.squeeze, s, axis=0)
 
     def test_transpose(self):
         msg = (r"transpose\(\) got multiple values for "
@@ -2022,7 +2055,3 @@ class TestNDFrame(tm.TestCase):
 
         with tm.assertRaises(ValueError):
             result = wp.pipe((f, 'y'), x=1, y=1)
-
-if __name__ == '__main__':
-    nose.runmodule(argv=[__file__, '-vvs', '-x', '--pdb', '--pdb-failure'],
-                   exit=False)

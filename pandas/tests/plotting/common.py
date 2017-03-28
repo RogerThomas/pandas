@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-import nose
+import pytest
 import os
 import warnings
 
@@ -28,7 +28,7 @@ def _skip_if_no_scipy_gaussian_kde():
     try:
         from scipy.stats import gaussian_kde  # noqa
     except ImportError:
-        raise nose.SkipTest("scipy version doesn't support gaussian_kde")
+        pytest.skip("scipy version doesn't support gaussian_kde")
 
 
 def _ok_for_gaussian_kde(kind):
@@ -53,6 +53,7 @@ class TestPlotBase(tm.TestCase):
         self.mpl_ge_1_4_0 = plotting._mpl_ge_1_4_0()
         self.mpl_ge_1_5_0 = plotting._mpl_ge_1_5_0()
         self.mpl_ge_2_0_0 = plotting._mpl_ge_2_0_0()
+        self.mpl_ge_2_0_1 = plotting._mpl_ge_2_0_1()
 
         if self.mpl_ge_1_4_0:
             self.bp_n_objects = 7

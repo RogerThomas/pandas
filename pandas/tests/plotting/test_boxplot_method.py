@@ -1,6 +1,6 @@
 # coding: utf-8
 
-import nose
+import pytest
 import itertools
 import string
 from distutils.version import LooseVersion
@@ -28,7 +28,7 @@ def _skip_if_mpl_14_or_dev_boxplot():
     # Don't need try / except since that's done at class level
     import matplotlib
     if str(matplotlib.__version__) >= LooseVersion('1.4'):
-        raise nose.SkipTest("Matplotlib Regression in 1.4 and current dev.")
+        pytest.skip("Matplotlib Regression in 1.4 and current dev.")
 
 
 @tm.mplskip
@@ -378,8 +378,3 @@ class TestDataFrameGroupByPlots(TestPlotBase):
         df = DataFrame({"a": [1, 2, 3, 4, 5, 6], "b": [0, 0, 0, 1, 1, 1]})
         self._check_ticks_props(df.boxplot("a", by="b", fontsize=16),
                                 xlabelsize=16, ylabelsize=16)
-
-
-if __name__ == '__main__':
-    nose.runmodule(argv=[__file__, '-vvs', '-x', '--pdb', '--pdb-failure'],
-                   exit=False)

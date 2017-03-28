@@ -12,12 +12,11 @@ from pandas.util.validators import validate_bool_kwarg
 
 from pandas.core import common as com
 import pandas.core.nanops as nanops
-import pandas.lib as lib
+import pandas._libs.lib as lib
 from pandas.compat.numpy import function as nv
 from pandas.util.decorators import (Appender, cache_readonly,
                                     deprecate_kwarg, Substitution)
 from pandas.core.common import AbstractMethodError
-from pandas.formats.printing import pprint_thing
 
 _shared_docs = dict()
 _indexops_doc_kwargs = dict(klass='IndexOpsMixin', inplace='',
@@ -230,6 +229,7 @@ class PandasDelegate(PandasObject):
 class AccessorProperty(object):
     """Descriptor for implementing accessor properties like Series.str
     """
+
     def __init__(self, accessor_cls, construct_accessor):
         self.accessor_cls = accessor_cls
         self.construct_accessor = construct_accessor
@@ -471,7 +471,7 @@ pandas.DataFrame.%(name)s
 
                 arg = new_arg
 
-            from pandas.tools.merge import concat
+            from pandas.tools.concat import concat
 
             def _agg_1dim(name, how, subset=None):
                 """
@@ -578,7 +578,7 @@ pandas.DataFrame.%(name)s
         return result, True
 
     def _aggregate_multiple_funcs(self, arg, _level):
-        from pandas.tools.merge import concat
+        from pandas.tools.concat import concat
 
         if self.axis != 0:
             raise NotImplementedError("axis other than 0 is not supported")
@@ -651,6 +651,7 @@ class GroupByMixin(object):
     @staticmethod
     def _dispatch(name, *args, **kwargs):
         """ dispatch to apply """
+
         def outer(self, *args, **kwargs):
             def f(x):
                 x = self._shallow_copy(x, groupby=self._groupby)
@@ -690,110 +691,6 @@ class GroupByMixin(object):
             if is_scalar(key) and key in subset or is_list_like(key):
                 self._selection = key
         return self
-
-
-class FrozenList(PandasObject, list):
-
-    """
-    Container that doesn't allow setting item *but*
-    because it's technically non-hashable, will be used
-    for lookups, appropriately, etc.
-    """
-    # Sidenote: This has to be of type list, otherwise it messes up PyTables
-    #           typechecks
-
-    def __add__(self, other):
-        if isinstance(other, tuple):
-            other = list(other)
-        return self.__class__(super(FrozenList, self).__add__(other))
-
-    __iadd__ = __add__
-
-    # Python 2 compat
-    def __getslice__(self, i, j):
-        return self.__class__(super(FrozenList, self).__getslice__(i, j))
-
-    def __getitem__(self, n):
-        # Python 3 compat
-        if isinstance(n, slice):
-            return self.__class__(super(FrozenList, self).__getitem__(n))
-        return super(FrozenList, self).__getitem__(n)
-
-    def __radd__(self, other):
-        if isinstance(other, tuple):
-            other = list(other)
-        return self.__class__(other + list(self))
-
-    def __eq__(self, other):
-        if isinstance(other, (tuple, FrozenList)):
-            other = list(other)
-        return super(FrozenList, self).__eq__(other)
-
-    __req__ = __eq__
-
-    def __mul__(self, other):
-        return self.__class__(super(FrozenList, self).__mul__(other))
-
-    __imul__ = __mul__
-
-    def __reduce__(self):
-        return self.__class__, (list(self),)
-
-    def __hash__(self):
-        return hash(tuple(self))
-
-    def _disabled(self, *args, **kwargs):
-        """This method will not function because object is immutable."""
-        raise TypeError("'%s' does not support mutable operations." %
-                        self.__class__.__name__)
-
-    def __unicode__(self):
-        return pprint_thing(self, quote_strings=True,
-                            escape_chars=('\t', '\r', '\n'))
-
-    def __repr__(self):
-        return "%s(%s)" % (self.__class__.__name__,
-                           str(self))
-
-    __setitem__ = __setslice__ = __delitem__ = __delslice__ = _disabled
-    pop = append = extend = remove = sort = insert = _disabled
-
-
-class FrozenNDArray(PandasObject, np.ndarray):
-
-    # no __array_finalize__ for now because no metadata
-    def __new__(cls, data, dtype=None, copy=False):
-        if copy is None:
-            copy = not isinstance(data, FrozenNDArray)
-        res = np.array(data, dtype=dtype, copy=copy).view(cls)
-        return res
-
-    def _disabled(self, *args, **kwargs):
-        """This method will not function because object is immutable."""
-        raise TypeError("'%s' does not support mutable operations." %
-                        self.__class__)
-
-    __setitem__ = __setslice__ = __delitem__ = __delslice__ = _disabled
-    put = itemset = fill = _disabled
-
-    def _shallow_copy(self):
-        return self.view()
-
-    def values(self):
-        """returns *copy* of underlying array"""
-        arr = self.view(np.ndarray).copy()
-        return arr
-
-    def __unicode__(self):
-        """
-        Return a string representation for this object.
-
-        Invoked by unicode(df) in py2 only. Yields a Unicode String in both
-        py2/py3.
-        """
-        prepr = pprint_thing(self, escape_chars=('\t', '\r', '\n'),
-                             quote_strings=True)
-        return "%s(%s, dtype='%s')" % (type(self).__name__, prepr, self.dtype)
 
 
 class IndexOpsMixin(object):
@@ -876,6 +773,10 @@ class IndexOpsMixin(object):
     def _values(self):
         """ the internal implementation """
         return self.values
+
+    @property
+    def empty(self):
+        return not self.size
 
     def max(self):
         """ The maximum value of the object """
@@ -1168,7 +1069,6 @@ class IndexOpsMixin(object):
             - ``first`` : Drop duplicates except for the first occurrence.
             - ``last`` : Drop duplicates except for the last occurrence.
             - False : Drop all duplicates.
-        take_last : deprecated
         %(inplace)s
 
         Returns
@@ -1176,8 +1076,6 @@ class IndexOpsMixin(object):
         deduplicated : %(klass)s
         """)
 
-    @deprecate_kwarg('take_last', 'keep', mapping={True: 'last',
-                                                   False: 'first'})
     @Appender(_shared_docs['drop_duplicates'] % _indexops_doc_kwargs)
     def drop_duplicates(self, keep='first', inplace=False):
         inplace = validate_bool_kwarg(inplace, 'inplace')
@@ -1203,15 +1101,12 @@ class IndexOpsMixin(object):
             - ``last`` : Mark duplicates as ``True`` except for the last
               occurrence.
             - False : Mark all duplicates as ``True``.
-        take_last : deprecated
 
         Returns
         -------
         duplicated : %(duplicated)s
         """)
 
-    @deprecate_kwarg('take_last', 'keep', mapping={True: 'last',
-                                                   False: 'first'})
     @Appender(_shared_docs['duplicated'] % _indexops_doc_kwargs)
     def duplicated(self, keep='first'):
         from pandas.core.algorithms import duplicated

@@ -1,9 +1,7 @@
 # -*- coding: utf-8 -*-
 # pylint: disable-msg=W0612,E1101
-import nose
 
 from pandas import DataFrame, Series
-from pandas.core.sparse import SparseDataFrame
 import pandas as pd
 
 from numpy import nan
@@ -14,8 +12,6 @@ from pandas.util.testing import assert_frame_equal
 from pandas.core.reshape import (melt, lreshape, get_dummies, wide_to_long)
 import pandas.util.testing as tm
 from pandas.compat import range, u
-
-_multiprocess_can_split_ = True
 
 
 class TestMelt(tm.TestCase):
@@ -58,6 +54,45 @@ class TestMelt(tm.TestCase):
                                          self.df['B'].tolist())},
                               columns=['id1', 'id2', 'variable', 'value'])
         tm.assert_frame_equal(result4, expected4)
+
+    def test_value_vars_types(self):
+        # GH 15348
+        expected = DataFrame({'id1': self.df['id1'].tolist() * 2,
+                              'id2': self.df['id2'].tolist() * 2,
+                              'variable': ['A'] * 10 + ['B'] * 10,
+                              'value': (self.df['A'].tolist() +
+                                        self.df['B'].tolist())},
+                             columns=['id1', 'id2', 'variable', 'value'])
+
+        for type_ in (tuple, list, np.array):
+            result = melt(self.df, id_vars=['id1', 'id2'],
+                          value_vars=type_(('A', 'B')))
+            tm.assert_frame_equal(result, expected)
+
+    def test_vars_work_with_multiindex(self):
+        expected = DataFrame({
+            ('A', 'a'): self.df1[('A', 'a')],
+            'CAP': ['B'] * len(self.df1),
+            'low': ['b'] * len(self.df1),
+            'value': self.df1[('B', 'b')],
+        }, columns=[('A', 'a'), 'CAP', 'low', 'value'])
+
+        result = melt(self.df1, id_vars=[('A', 'a')], value_vars=[('B', 'b')])
+        tm.assert_frame_equal(result, expected)
+
+    def test_tuple_vars_fail_with_multiindex(self):
+        # melt should fail with an informative error message if
+        # the columns have a MultiIndex and a tuple is passed
+        # for id_vars or value_vars.
+        tuple_a = ('A', 'a')
+        list_a = [tuple_a]
+        tuple_b = ('B', 'b')
+        list_b = [tuple_b]
+
+        for id_vars, value_vars in ((tuple_a, list_b), (list_a, tuple_b),
+                                    (tuple_a, tuple_b)):
+            with tm.assertRaisesRegexp(ValueError, r'MultiIndex'):
+                melt(self.df1, id_vars=id_vars, value_vars=value_vars)
 
     def test_custom_var_name(self):
         result5 = melt(self.df, var_name=self.var_name)
@@ -198,25 +233,31 @@ class TestGetDummies(tm.TestCase):
                           'b': ['A', 'A', 'B', 'C', 'C'],
                           'c': [2, 3, 3, 3, 2]})
 
+        expected = DataFrame({'a': [1, 0, 0],
+                              'b': [0, 1, 0],
+                              'c': [0, 0, 1]},
+                             dtype='uint8',
+                             columns=list('abc'))
         if not self.sparse:
-            exp_df_type = DataFrame
-            exp_blk_type = pd.core.internals.IntBlock
+            compare = tm.assert_frame_equal
         else:
-            exp_df_type = SparseDataFrame
-            exp_blk_type = pd.core.internals.SparseBlock
+            expected = expected.to_sparse(fill_value=0, kind='integer')
+            compare = tm.assert_sp_frame_equal
 
-        self.assertEqual(
-            type(get_dummies(s_list, sparse=self.sparse)), exp_df_type)
-        self.assertEqual(
-            type(get_dummies(s_series, sparse=self.sparse)), exp_df_type)
+        result = get_dummies(s_list, sparse=self.sparse)
+        compare(result, expected)
 
-        r = get_dummies(s_df, sparse=self.sparse, columns=s_df.columns)
-        self.assertEqual(type(r), exp_df_type)
+        result = get_dummies(s_series, sparse=self.sparse)
+        compare(result, expected)
 
-        r = get_dummies(s_df, sparse=self.sparse, columns=['a'])
-        self.assertEqual(type(r[['a_0']]._data.blocks[0]), exp_blk_type)
-        self.assertEqual(type(r[['a_1']]._data.blocks[0]), exp_blk_type)
-        self.assertEqual(type(r[['a_2']]._data.blocks[0]), exp_blk_type)
+        result = get_dummies(s_df, sparse=self.sparse, columns=s_df.columns)
+        tm.assert_series_equal(result.get_dtype_counts(),
+                               Series({'uint8': 8}))
+
+        result = get_dummies(s_df, sparse=self.sparse, columns=['a'])
+        expected = Series({'uint8': 3, 'int64': 1, 'object': 1}).sort_values()
+        tm.assert_series_equal(result.get_dtype_counts().sort_values(),
+                               expected)
 
     def test_just_na(self):
         just_na_list = [np.nan]
@@ -914,8 +955,3 @@ class TestWideToLong(tm.TestCase):
         exp_frame = exp_frame.set_index(['famid', 'birth', 'age'])[['ht']]
         long_frame = wide_to_long(df, 'ht', i=['famid', 'birth'], j='age')
         tm.assert_frame_equal(long_frame, exp_frame)
-
-
-if __name__ == '__main__':
-    nose.runmodule(argv=[__file__, '-vvs', '-x', '--pdb', '--pdb-failure'],
-                   exit=False)

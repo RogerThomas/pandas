@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
-import nose
-
+from warnings import catch_warnings
 from pandas.core import panelnd
 from pandas.core.panel import Panel
 
@@ -15,7 +14,7 @@ class TestPanelnd(tm.TestCase):
 
     def test_4d_construction(self):
 
-        with tm.assert_produces_warning(FutureWarning, check_stacklevel=False):
+        with catch_warnings(record=True):
 
             # create a 4D
             Panel4D = panelnd.create_nd_panel_factory(
@@ -31,7 +30,7 @@ class TestPanelnd(tm.TestCase):
 
     def test_4d_construction_alt(self):
 
-        with tm.assert_produces_warning(FutureWarning, check_stacklevel=False):
+        with catch_warnings(record=True):
 
             # create a 4D
             Panel4D = panelnd.create_nd_panel_factory(
@@ -63,7 +62,7 @@ class TestPanelnd(tm.TestCase):
 
     def test_5d_construction(self):
 
-        with tm.assert_produces_warning(FutureWarning, check_stacklevel=False):
+        with catch_warnings(record=True):
 
             # create a 4D
             Panel4D = panelnd.create_nd_panel_factory(
@@ -101,7 +100,3 @@ class TestPanelnd(tm.TestCase):
             # test a transpose
             # results  = p5d.transpose(1,2,3,4,0)
             # expected =
-
-if __name__ == '__main__':
-    nose.runmodule(argv=[__file__, '-vvs', '-x', '--pdb', '--pdb-failure'],
-                   exit=False)

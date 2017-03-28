@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 
-import nose
 import numpy as np
 from datetime import datetime
 from pandas.util import testing as tm
@@ -8,14 +7,12 @@ from pandas.util import testing as tm
 import pandas as pd
 from pandas.core import config as cf
 from pandas.compat import u
-from pandas.tslib import iNaT
+from pandas._libs.tslib import iNaT
 from pandas import (NaT, Float64Index, Series,
                     DatetimeIndex, TimedeltaIndex, date_range)
 from pandas.types.dtypes import DatetimeTZDtype
 from pandas.types.missing import (array_equivalent, isnull, notnull,
                                   na_value_for_dtype)
-
-_multiprocess_can_split_ = True
 
 
 def test_notnull():
@@ -304,8 +301,3 @@ def test_na_value_for_dtype():
 
     for dtype in ['O']:
         assert np.isnan(na_value_for_dtype(np.dtype(dtype)))
-
-
-if __name__ == '__main__':
-    nose.runmodule(argv=[__file__, '-vvs', '-x', '--pdb', '--pdb-failure'],
-                   exit=False)

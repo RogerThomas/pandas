@@ -14,7 +14,6 @@ randn = np.random.randn
 
 
 class TestDatetimeIndex(tm.TestCase):
-    _multiprocess_can_split_ = True
 
     def test_get_loc(self):
         idx = pd.date_range('2000-01-01', periods=3)
@@ -94,6 +93,14 @@ class TestDatetimeIndex(tm.TestCase):
         with tm.assertRaises(ValueError):
             idx.get_indexer(idx[[0]], method='nearest', tolerance='foo')
 
+    def test_reasonable_keyerror(self):
+        # GH #1062
+        index = DatetimeIndex(['1/3/2000'])
+        try:
+            index.get_loc('1/1/2000')
+        except KeyError as e:
+            self.assertIn('2000', str(e))
+
     def test_roundtrip_pickle_with_tz(self):
 
         # GH 8367
@@ -110,7 +117,7 @@ class TestDatetimeIndex(tm.TestCase):
 
     def test_time_loc(self):  # GH8667
         from datetime import time
-        from pandas.index import _SIZE_CUTOFF
+        from pandas._libs.index import _SIZE_CUTOFF
 
         ns = _SIZE_CUTOFF + np.array([-100, 100], dtype=np.int64)
         key = time(15, 11, 30)
@@ -456,74 +463,6 @@ class TestDatetimeIndex(tm.TestCase):
         self.assertTrue(ordered[::-1].is_monotonic)
         self.assert_numpy_array_equal(dexer,
                                       np.array([0, 2, 1], dtype=np.intp))
-
-    def test_round(self):
-
-        # round
-        dt = Timestamp('20130101 09:10:11')
-        result = dt.round('D')
-        expected = Timestamp('20130101')
-        self.assertEqual(result, expected)
-
-        dt = Timestamp('20130101 19:10:11')
-        result = dt.round('D')
-        expected = Timestamp('20130102')
-        self.assertEqual(result, expected)
-
-        dt = Timestamp('20130201 12:00:00')
-        result = dt.round('D')
-        expected = Timestamp('20130202')
-        self.assertEqual(result, expected)
-
-        dt = Timestamp('20130104 12:00:00')
-        result = dt.round('D')
-        expected = Timestamp('20130105')
-        self.assertEqual(result, expected)
-
-        dt = Timestamp('20130104 12:32:00')
-        result = dt.round('30Min')
-        expected = Timestamp('20130104 12:30:00')
-        self.assertEqual(result, expected)
-
-        dti = date_range('20130101 09:10:11', periods=5)
-        result = dti.round('D')
-        expected = date_range('20130101', periods=5)
-        tm.assert_index_equal(result, expected)
-
-        # floor
-        dt = Timestamp('20130101 09:10:11')
-        result = dt.floor('D')
-        expected = Timestamp('20130101')
-        self.assertEqual(result, expected)
-
-        # ceil
-        dt = Timestamp('20130101 09:10:11')
-        result = dt.ceil('D')
-        expected = Timestamp('20130102')
-        self.assertEqual(result, expected)
-
-        # round with tz
-        dt = Timestamp('20130101 09:10:11', tz='US/Eastern')
-        result = dt.round('D')
-        expected = Timestamp('20130101', tz='US/Eastern')
-        self.assertEqual(result, expected)
-
-        dt = Timestamp('20130101 09:10:11', tz='US/Eastern')
-        result = dt.round('s')
-        self.assertEqual(result, dt)
-
-        dti = date_range('20130101 09:10:11',
-                         periods=5).tz_localize('UTC').tz_convert('US/Eastern')
-        result = dti.round('D')
-        expected = date_range('20130101', periods=5).tz_localize('US/Eastern')
-        tm.assert_index_equal(result, expected)
-
-        result = dti.round('s')
-        tm.assert_index_equal(result, dti)
-
-        # invalid
-        for freq in ['Y', 'M', 'foobar']:
-            self.assertRaises(ValueError, lambda: dti.round(freq))
 
     def test_take(self):
         dates = [datetime(2010, 1, 1, 14), datetime(2010, 1, 1, 15),

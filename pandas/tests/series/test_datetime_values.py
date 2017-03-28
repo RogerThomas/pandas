@@ -8,10 +8,8 @@ import pandas as pd
 
 from pandas.types.common import is_integer_dtype, is_list_like
 from pandas import (Index, Series, DataFrame, bdate_range,
-                    date_range, period_range, timedelta_range)
-from pandas.tseries.period import PeriodIndex
-from pandas.tseries.index import Timestamp, DatetimeIndex
-from pandas.tseries.tdi import TimedeltaIndex
+                    date_range, period_range, timedelta_range,
+                    PeriodIndex, Timestamp, DatetimeIndex, TimedeltaIndex)
 import pandas.core.common as com
 
 from pandas.util.testing import assert_series_equal
@@ -22,28 +20,18 @@ from .common import TestData
 
 class TestSeriesDatetimeValues(TestData, tm.TestCase):
 
-    _multiprocess_can_split_ = True
-
     def test_dt_namespace_accessor(self):
 
         # GH 7207, 11128
         # test .dt namespace accessor
 
-        ok_for_base = ['year', 'month', 'day', 'hour', 'minute', 'second',
-                       'weekofyear', 'week', 'dayofweek', 'weekday',
-                       'dayofyear', 'quarter', 'freq', 'days_in_month',
-                       'daysinmonth', 'is_leap_year']
-        ok_for_period = ok_for_base + ['qyear', 'start_time', 'end_time']
+        ok_for_period = PeriodIndex._datetimelike_ops
         ok_for_period_methods = ['strftime', 'to_timestamp', 'asfreq']
-        ok_for_dt = ok_for_base + ['date', 'time', 'microsecond', 'nanosecond',
-                                   'is_month_start', 'is_month_end',
-                                   'is_quarter_start', 'is_quarter_end',
-                                   'is_year_start', 'is_year_end', 'tz',
-                                   'weekday_name']
+        ok_for_dt = DatetimeIndex._datetimelike_ops
         ok_for_dt_methods = ['to_period', 'to_pydatetime', 'tz_localize',
                              'tz_convert', 'normalize', 'strftime', 'round',
                              'floor', 'ceil', 'weekday_name']
-        ok_for_td = ['days', 'seconds', 'microseconds', 'nanoseconds']
+        ok_for_td = TimedeltaIndex._datetimelike_ops
         ok_for_td_methods = ['components', 'to_pytimedelta', 'total_seconds',
                              'round', 'floor', 'ceil']
 
@@ -168,9 +156,9 @@ class TestSeriesDatetimeValues(TestData, tm.TestCase):
         cases = [Series(timedelta_range('1 day', periods=5),
                         index=list('abcde'), name='xxx'),
                  Series(timedelta_range('1 day 01:23:45', periods=5,
-                        freq='s'), name='xxx'),
+                                        freq='s'), name='xxx'),
                  Series(timedelta_range('2 days 01:23:45.012345', periods=5,
-                        freq='ms'), name='xxx')]
+                                        freq='ms'), name='xxx')]
         for s in cases:
             for prop in ok_for_td:
                 # we test freq below

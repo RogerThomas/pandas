@@ -8,7 +8,7 @@ from numpy import nan
 import numpy as np
 
 from pandas.compat import (lmap, range, lrange, StringIO, u)
-from pandas.parser import ParserError
+from pandas.io.common import ParserError
 from pandas import (DataFrame, Index, Series, MultiIndex, Timestamp,
                     date_range, read_csv, compat, to_datetime)
 import pandas as pd
@@ -30,8 +30,6 @@ MIXED_INT_DTYPES = ['uint8', 'uint16', 'uint32', 'uint64', 'int8', 'int16',
 
 
 class TestDataFrameToCSV(tm.TestCase, TestData):
-
-    _multiprocess_can_split_ = True
 
     def test_to_csv_from_csv1(self):
 
@@ -1145,9 +1143,3 @@ class TestDataFrameToCSV(tm.TestCase, TestData):
         df = df.set_index(['a', 'b'])
         expected = '"a","b","c"\n"1","3","5"\n"2","4","6"\n'
         self.assertEqual(df.to_csv(quoting=csv.QUOTE_ALL), expected)
-
-
-if __name__ == '__main__':
-    import nose
-    nose.runmodule(argv=[__file__, '-vvs', '-x', '--pdb', '--pdb-failure'],
-                   exit=False)

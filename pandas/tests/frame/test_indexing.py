@@ -18,6 +18,7 @@ from pandas import (DataFrame, Index, Series, notnull, isnull,
                     date_range)
 import pandas as pd
 
+from pandas._libs.tslib import iNaT
 from pandas.tseries.offsets import BDay
 from pandas.types.common import (is_float_dtype,
                                  is_integer,
@@ -36,8 +37,6 @@ from pandas.tests.frame.common import TestData
 
 
 class TestDataFrameIndexing(tm.TestCase, TestData):
-
-    _multiprocess_can_split_ = True
 
     def test_getitem(self):
         # slicing
@@ -1493,8 +1492,7 @@ class TestDataFrameIndexing(tm.TestCase, TestData):
         assert_series_equal(result, expected)
 
         # set an allowable datetime64 type
-        from pandas import tslib
-        df.loc['b', 'timestamp'] = tslib.iNaT
+        df.loc['b', 'timestamp'] = iNaT
         self.assertTrue(isnull(df.loc['b', 'timestamp']))
 
         # allow this syntax
@@ -1763,12 +1761,8 @@ class TestDataFrameIndexing(tm.TestCase, TestData):
         result = df.loc[[0], "b"]
         assert_series_equal(result, expected)
 
-    def test_irow(self):
+    def test_iloc_row(self):
         df = DataFrame(np.random.randn(10, 4), index=lrange(0, 20, 2))
-
-        # 10711, deprecated
-        with tm.assert_produces_warning(FutureWarning):
-            df.irow(1)
 
         result = df.iloc[1]
         exp = df.loc[2]
@@ -1797,13 +1791,9 @@ class TestDataFrameIndexing(tm.TestCase, TestData):
         expected = df.reindex(df.index[[1, 2, 4, 6]])
         assert_frame_equal(result, expected)
 
-    def test_icol(self):
+    def test_iloc_col(self):
 
         df = DataFrame(np.random.randn(4, 10), columns=lrange(0, 20, 2))
-
-        # 10711, deprecated
-        with tm.assert_produces_warning(FutureWarning):
-            df.icol(1)
 
         result = df.iloc[:, 1]
         exp = df.loc[:, 2]
@@ -1830,8 +1820,7 @@ class TestDataFrameIndexing(tm.TestCase, TestData):
         expected = df.reindex(columns=df.columns[[1, 2, 4, 6]])
         assert_frame_equal(result, expected)
 
-    def test_irow_icol_duplicates(self):
-        # 10711, deprecated
+    def test_iloc_duplicates(self):
 
         df = DataFrame(np.random.rand(3, 3), columns=list('ABC'),
                        index=list('aab'))
@@ -1876,16 +1865,12 @@ class TestDataFrameIndexing(tm.TestCase, TestData):
         expected = df.take([0], axis=1)
         assert_frame_equal(result, expected)
 
-    def test_icol_sparse_propegate_fill_value(self):
+    def test_iloc_sparse_propegate_fill_value(self):
         from pandas.sparse.api import SparseDataFrame
         df = SparseDataFrame({'A': [999, 1]}, default_fill_value=999)
         self.assertTrue(len(df['A'].sp_values) == len(df.iloc[:, 0].sp_values))
 
-    def test_iget_value(self):
-        # 10711 deprecated
-
-        with tm.assert_produces_warning(FutureWarning):
-            self.frame.iget_value(0, 0)
+    def test_iat(self):
 
         for i, row in enumerate(self.frame.index):
             for j, col in enumerate(self.frame.columns):
@@ -1944,6 +1929,21 @@ class TestDataFrameIndexing(tm.TestCase, TestData):
         expected = pd.DataFrame({'x': [0, 1, 1, np.nan]}, index=target)
         actual = df.reindex(target, method='nearest', tolerance=0.2)
         assert_frame_equal(expected, actual)
+
+    def test_reindex_frame_add_nat(self):
+        rng = date_range('1/1/2000 00:00:00', periods=10, freq='10s')
+        df = DataFrame({'A': np.random.randn(len(rng)), 'B': rng})
+
+        result = df.reindex(lrange(15))
+        self.assertTrue(np.issubdtype(result['B'].dtype, np.dtype('M8[ns]')))
+
+        mask = com.isnull(result)['B']
+        self.assertTrue(mask[-5:].all())
+        self.assertFalse(mask[:-5].any())
+
+    def test_set_dataframe_column_ns_dtype(self):
+        x = DataFrame([datetime.now(), datetime.now()])
+        self.assertEqual(x[0].dtype, np.dtype('M8[ns]'))
 
     def test_non_monotonic_reindex_methods(self):
         dr = pd.date_range('2013-08-01', periods=6, freq='B')
@@ -2466,6 +2466,95 @@ class TestDataFrameIndexing(tm.TestCase, TestData):
         expected = df[df['a'] == 1].reindex(df.index)
         assert_frame_equal(result, expected)
 
+    def test_where_array_like(self):
+        # see gh-15414
+        klasses = [list, tuple, np.array]
+
+        df = DataFrame({'a': [1, 2, 3]})
+        cond = [[False], [True], [True]]
+        expected = DataFrame({'a': [np.nan, 2, 3]})
+
+        for klass in klasses:
+            result = df.where(klass(cond))
+            assert_frame_equal(result, expected)
+
+        df['b'] = 2
+        expected['b'] = [2, np.nan, 2]
+        cond = [[False, True], [True, False], [True, True]]
+
+        for klass in klasses:
+            result = df.where(klass(cond))
+            assert_frame_equal(result, expected)
+
+    def test_where_invalid_input(self):
+        # see gh-15414: only boolean arrays accepted
+        df = DataFrame({'a': [1, 2, 3]})
+        msg = "Boolean array expected for the condition"
+
+        conds = [
+            [[1], [0], [1]],
+            Series([[2], [5], [7]]),
+            DataFrame({'a': [2, 5, 7]}),
+            [["True"], ["False"], ["True"]],
+            [[Timestamp("2017-01-01")],
+             [pd.NaT], [Timestamp("2017-01-02")]]
+        ]
+
+        for cond in conds:
+            with tm.assertRaisesRegexp(ValueError, msg):
+                df.where(cond)
+
+        df['b'] = 2
+        conds = [
+            [[0, 1], [1, 0], [1, 1]],
+            Series([[0, 2], [5, 0], [4, 7]]),
+            [["False", "True"], ["True", "False"],
+             ["True", "True"]],
+            DataFrame({'a': [2, 5, 7], 'b': [4, 8, 9]}),
+            [[pd.NaT, Timestamp("2017-01-01")],
+             [Timestamp("2017-01-02"), pd.NaT],
+             [Timestamp("2017-01-03"), Timestamp("2017-01-03")]]
+        ]
+
+        for cond in conds:
+            with tm.assertRaisesRegexp(ValueError, msg):
+                df.where(cond)
+
+    def test_where_dataframe_col_match(self):
+        df = DataFrame([[1, 2, 3], [4, 5, 6]])
+        cond = DataFrame([[True, False, True], [False, False, True]])
+
+        out = df.where(cond)
+        expected = DataFrame([[1.0, np.nan, 3], [np.nan, np.nan, 6]])
+        tm.assert_frame_equal(out, expected)
+
+        cond.columns = ["a", "b", "c"]  # Columns no longer match.
+        msg = "Boolean array expected for the condition"
+        with tm.assertRaisesRegexp(ValueError, msg):
+            df.where(cond)
+
+    def test_where_ndframe_align(self):
+        msg = "Array conditional must be same shape as self"
+        df = DataFrame([[1, 2, 3], [4, 5, 6]])
+
+        cond = [True]
+        with tm.assertRaisesRegexp(ValueError, msg):
+            df.where(cond)
+
+        expected = DataFrame([[1, 2, 3], [np.nan, np.nan, np.nan]])
+
+        out = df.where(Series(cond))
+        tm.assert_frame_equal(out, expected)
+
+        cond = np.array([False, True, False, True])
+        with tm.assertRaisesRegexp(ValueError, msg):
+            df.where(cond)
+
+        expected = DataFrame([[np.nan, np.nan, np.nan], [4, 5, 6]])
+
+        out = df.where(Series(cond))
+        tm.assert_frame_equal(out, expected)
+
     def test_where_bug(self):
 
         # GH 2793
@@ -2826,8 +2915,6 @@ class TestDataFrameIndexing(tm.TestCase, TestData):
 
 class TestDataFrameIndexingDatetimeWithTZ(tm.TestCase, TestData):
 
-    _multiprocess_can_split_ = True
-
     def setUp(self):
         self.idx = Index(date_range('20130101', periods=3, tz='US/Eastern'),
                          name='foo')
@@ -2887,8 +2974,6 @@ class TestDataFrameIndexingDatetimeWithTZ(tm.TestCase, TestData):
 
 class TestDataFrameIndexingUInt64(tm.TestCase, TestData):
 
-    _multiprocess_can_split_ = True
-
     def setUp(self):
         self.ir = Index(np.arange(3), dtype=np.uint64)
         self.idx = Index([2**63, 2**63 + 5, 2**63 + 10], name='foo')
@@ -2939,9 +3024,3 @@ class TestDataFrameIndexingUInt64(tm.TestCase, TestData):
         expected = DataFrame(self.df.values.T)
         expected.index = ['A', 'B']
         assert_frame_equal(result, expected)
-
-
-if __name__ == '__main__':
-    import nose
-    nose.runmodule(argv=[__file__, '-vvs', '-x', '--pdb', '--pdb-failure'],
-                   exit=False)

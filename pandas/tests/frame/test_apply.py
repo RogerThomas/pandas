@@ -19,8 +19,6 @@ from pandas.tests.frame.common import TestData
 
 class TestDataFrameApply(tm.TestCase, TestData):
 
-    _multiprocess_can_split_ = True
-
     def test_apply(self):
         with np.errstate(all='ignore'):
             # ufunc
@@ -432,6 +430,15 @@ class TestDataFrameApply(tm.TestCase, TestData):
                             'c': ['Timedelta', 'Timedelta'],
                             'd': ['Period', 'Period']})
         tm.assert_frame_equal(res, exp)
+
+    def test_frame_apply_dont_convert_datetime64(self):
+        from pandas.tseries.offsets import BDay
+        df = DataFrame({'x1': [datetime(1996, 1, 1)]})
+
+        df = df.applymap(lambda x: x + BDay())
+        df = df.applymap(lambda x: x + BDay())
+
+        self.assertTrue(df.x1.dtype == 'M8[ns]')
 
     # See gh-12244
     def test_apply_non_numpy_dtype(self):

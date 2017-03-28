@@ -1,5 +1,5 @@
 import numpy as np
-import pandas.index as _index
+from pandas._libs import index as libindex
 
 from pandas import compat
 from pandas.compat.numpy import function as nv
@@ -11,13 +11,16 @@ from pandas.types.common import (is_categorical_dtype,
 from pandas.types.missing import array_equivalent
 
 
-from pandas.util.decorators import (Appender, cache_readonly,
-                                    deprecate_kwarg)
+from pandas.util.decorators import Appender, cache_readonly
 from pandas.core.config import get_option
 from pandas.indexes.base import Index, _index_shared_docs
 import pandas.core.base as base
 import pandas.core.missing as missing
 import pandas.indexes.base as ibase
+from pandas.core.common import _asarray_tuplesafe
+
+_index_doc_kwargs = dict(ibase._index_doc_kwargs)
+_index_doc_kwargs.update(dict(target_klass='CategoricalIndex'))
 
 
 class CategoricalIndex(Index, base.PandasDelegate):
@@ -43,7 +46,7 @@ class CategoricalIndex(Index, base.PandasDelegate):
     """
 
     _typ = 'categoricalindex'
-    _engine_type = _index.Int64Engine
+    _engine_type = libindex.Int64Engine
     _attributes = ['name']
 
     def __new__(cls, data=None, categories=None, ordered=None, dtype=None,
@@ -289,7 +292,7 @@ class CategoricalIndex(Index, base.PandasDelegate):
     def is_unique(self):
         return not self.duplicated().any()
 
-    @Appender(base._shared_docs['unique'] % ibase._index_doc_kwargs)
+    @Appender(base._shared_docs['unique'] % _index_doc_kwargs)
     def unique(self):
         result = base.IndexOpsMixin.unique(self)
         # CategoricalIndex._shallow_copy uses keeps original categories
@@ -297,11 +300,9 @@ class CategoricalIndex(Index, base.PandasDelegate):
         return self._shallow_copy(result, categories=result.categories,
                                   ordered=result.ordered)
 
-    @deprecate_kwarg('take_last', 'keep', mapping={True: 'last',
-                                                   False: 'first'})
-    @Appender(base._shared_docs['duplicated'] % ibase._index_doc_kwargs)
+    @Appender(base._shared_docs['duplicated'] % _index_doc_kwargs)
     def duplicated(self, keep='first'):
-        from pandas.hashtable import duplicated_int64
+        from pandas._libs.hashtable import duplicated_int64
         codes = self.codes.astype('i8')
         return duplicated_int64(codes, keep)
 
@@ -332,19 +333,8 @@ class CategoricalIndex(Index, base.PandasDelegate):
         """ always allow reindexing """
         pass
 
+    @Appender(_index_shared_docs['where'])
     def where(self, cond, other=None):
-        """
-        .. versionadded:: 0.19.0
-
-        Return an Index of same shape as self and whose corresponding
-        entries are from self where cond is True and otherwise are from
-        other.
-
-        Parameters
-        ----------
-        cond : boolean same length as self
-        other : scalar, or array-like
-        """
         if other is None:
             other = self._na_value
         values = np.where(cond, self.values, other)
@@ -436,34 +426,8 @@ class CategoricalIndex(Index, base.PandasDelegate):
 
         return new_target, indexer, new_indexer
 
+    @Appender(_index_shared_docs['get_indexer'] % _index_doc_kwargs)
     def get_indexer(self, target, method=None, limit=None, tolerance=None):
-        """
-        Compute indexer and mask for new index given the current index. The
-        indexer should be then used as an input to ndarray.take to align the
-        current data to the new index. The mask determines whether labels are
-        found or not in the current index
-
-        Parameters
-        ----------
-        target : MultiIndex or Index (of tuples)
-        method : {'pad', 'ffill', 'backfill', 'bfill'}
-            pad / ffill: propagate LAST valid observation forward to next valid
-            backfill / bfill: use NEXT valid observation to fill gap
-
-        Notes
-        -----
-        This is a low-level method and probably should be used at your own risk
-
-        Examples
-        --------
-        >>> indexer, mask = index.get_indexer(new_index)
-        >>> new_values = cur_values.take(indexer)
-        >>> new_values[-mask] = np.nan
-
-        Returns
-        -------
-        (indexer, mask) : (ndarray, ndarray)
-        """
         method = missing.clean_reindex_fill_method(method)
         target = ibase._ensure_index(target)
 
@@ -483,10 +447,8 @@ class CategoricalIndex(Index, base.PandasDelegate):
 
         return _ensure_platform_int(indexer)
 
+    @Appender(_index_shared_docs['get_indexer_non_unique'] % _index_doc_kwargs)
     def get_indexer_non_unique(self, target):
-        """ this is the same for a CategoricalIndex for get_indexer; the API
-        returns the missing values as well
-        """
         target = ibase._ensure_index(target)
 
         if isinstance(target, CategoricalIndex):
@@ -495,12 +457,10 @@ class CategoricalIndex(Index, base.PandasDelegate):
         codes = self.categories.get_indexer(target)
         return self._engine.get_indexer_non_unique(codes)
 
+    @Appender(_index_shared_docs['_convert_list_indexer'])
     def _convert_list_indexer(self, keyarr, kind=None):
-        """
-        we are passed a list indexer.
-        Return our indexer or raise if all of the values are not included in
-        the categories
-        """
+        # Return our indexer or raise if all of the values are not included in
+        # the categories
         codes = self.categories.get_indexer(keyarr)
         if (codes == -1).any():
             raise KeyError("a list-indexer must only include values that are "
@@ -508,7 +468,16 @@ class CategoricalIndex(Index, base.PandasDelegate):
 
         return None
 
-    @Appender(_index_shared_docs['take'])
+    @Appender(_index_shared_docs['_convert_arr_indexer'])
+    def _convert_arr_indexer(self, keyarr):
+        keyarr = _asarray_tuplesafe(keyarr)
+        return self._shallow_copy(keyarr)
+
+    @Appender(_index_shared_docs['_convert_index_indexer'])
+    def _convert_index_indexer(self, keyarr):
+        return self._shallow_copy(keyarr)
+
+    @Appender(_index_shared_docs['take'] % _index_doc_kwargs)
     def take(self, indices, axis=0, allow_fill=True,
              fill_value=None, **kwargs):
         nv.validate_take(tuple(), kwargs)
@@ -586,6 +555,10 @@ class CategoricalIndex(Index, base.PandasDelegate):
         # if name is None, _create_from_codes sets self.name
         result.name = name
         return result
+
+    def _codes_for_groupby(self, sort):
+        """ Return a Categorical adjusted for groupby """
+        return self.values._codes_for_groupby(sort)
 
     @classmethod
     def _add_comparison_methods(cls):

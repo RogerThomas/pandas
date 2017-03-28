@@ -4,7 +4,7 @@ timedelta support tools
 
 import numpy as np
 import pandas as pd
-import pandas.tslib as tslib
+import pandas._libs.tslib as tslib
 
 from pandas.types.common import (_ensure_object,
                                  is_integer_dtype,
@@ -86,6 +86,7 @@ def to_timedelta(arg, unit='ns', box=True, errors='raise'):
     # ...so it must be a scalar value. Return scalar.
     return _coerce_scalar_to_timedelta_type(arg, unit=unit,
                                             box=box, errors=errors)
+
 
 _unit_map = {
     'Y': 'Y',

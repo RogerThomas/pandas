@@ -3,13 +3,12 @@
 import numpy as np
 from pandas import Index
 
-import pandas._join as _join
+from pandas._libs import join as _join
 import pandas.util.testing as tm
 from pandas.util.testing import assert_almost_equal
 
 
 class TestIndexer(tm.TestCase):
-    _multiprocess_can_split_ = True
 
     def test_outer_join_indexer(self):
         typemap = [('int32', _join.outer_join_indexer_int32),
@@ -193,9 +192,3 @@ def test_inner_join_indexer2():
 
     exp_ridx = np.array([0, 1, 2, 3], dtype=np.int64)
     assert_almost_equal(ridx, exp_ridx)
-
-
-if __name__ == '__main__':
-    import nose
-    nose.runmodule(argv=[__file__, '-vvs', '-x', '--pdb', '--pdb-failure'],
-                   exit=False)

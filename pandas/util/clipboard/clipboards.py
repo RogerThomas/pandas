@@ -50,7 +50,8 @@ def init_qt_clipboard():
     # $DISPLAY should exist
     from PyQt4.QtGui import QApplication
 
-    app = QApplication([])
+    # use the global instance if it exists
+    app = QApplication.instance() or QApplication([])
 
     def copy_qt(text):
         cb = app.clipboard()
@@ -123,6 +124,7 @@ def init_klipper_clipboard():
 
 def init_no_clipboard():
     class ClipboardUnavailable(object):
+
         def __call__(self, *args, **kwargs):
             raise PyperclipException(EXCEPT_MSG)
 

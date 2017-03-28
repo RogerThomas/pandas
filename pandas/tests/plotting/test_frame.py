@@ -1,6 +1,8 @@
 # coding: utf-8
 
-import nose
+""" Test cases for DataFrame.plot """
+
+import pytest
 import string
 import warnings
 
@@ -24,9 +26,6 @@ import pandas.tools.plotting as plotting
 from pandas.tests.plotting.common import (TestPlotBase, _check_plot_works,
                                           _skip_if_no_scipy_gaussian_kde,
                                           _ok_for_gaussian_kde)
-
-
-""" Test cases for DataFrame.plot """
 
 
 @tm.mplskip
@@ -1276,7 +1275,7 @@ class TestDataFramePlots(TestPlotBase):
     def test_hist_df(self):
         from matplotlib.patches import Rectangle
         if self.mpl_le_1_2_1:
-            raise nose.SkipTest("not supported in matplotlib <= 1.2.x")
+            pytest.skip("not supported in matplotlib <= 1.2.x")
 
         df = DataFrame(randn(100, 4))
         series = df[0]
@@ -2726,8 +2725,3 @@ def _generate_4_axes_via_gridspec():
     ax_lr = plt.subplot(gs[1, 1])
 
     return gs, [ax_tl, ax_ll, ax_tr, ax_lr]
-
-
-if __name__ == '__main__':
-    nose.runmodule(argv=[__file__, '-vvs', '-x', '--pdb', '--pdb-failure'],
-                   exit=False)

@@ -2,13 +2,15 @@ import numpy as np
 from datetime import timedelta
 
 import pandas as pd
+from pandas import offsets
 import pandas.util.testing as tm
-from pandas.tslib import OutOfBoundsDatetime
-from pandas import (DatetimeIndex, Index, Timestamp, datetime, date_range)
+from pandas._libs import tslib, lib
+from pandas._libs.tslib import OutOfBoundsDatetime
+from pandas import (DatetimeIndex, Index, Timestamp, datetime, date_range,
+                    to_datetime)
 
 
 class TestDatetimeIndex(tm.TestCase):
-    _multiprocess_can_split_ = True
 
     def test_construction_with_alt(self):
 
@@ -423,3 +425,150 @@ class TestDatetimeIndex(tm.TestCase):
         idx = DatetimeIndex([t1])
 
         self.assertEqual(idx.nanosecond[0], t1.nanosecond)
+
+
+class TestTimeSeries(tm.TestCase):
+
+    def test_dti_constructor_preserve_dti_freq(self):
+        rng = date_range('1/1/2000', '1/2/2000', freq='5min')
+
+        rng2 = DatetimeIndex(rng)
+        self.assertEqual(rng.freq, rng2.freq)
+
+    def test_dti_constructor_years_only(self):
+        # GH 6961
+        for tz in [None, 'UTC', 'Asia/Tokyo', 'dateutil/US/Pacific']:
+            rng1 = date_range('2014', '2015', freq='M', tz=tz)
+            expected1 = date_range('2014-01-31', '2014-12-31', freq='M', tz=tz)
+
+            rng2 = date_range('2014', '2015', freq='MS', tz=tz)
+            expected2 = date_range('2014-01-01', '2015-01-01', freq='MS',
+                                   tz=tz)
+
+            rng3 = date_range('2014', '2020', freq='A', tz=tz)
+            expected3 = date_range('2014-12-31', '2019-12-31', freq='A', tz=tz)
+
+            rng4 = date_range('2014', '2020', freq='AS', tz=tz)
+            expected4 = date_range('2014-01-01', '2020-01-01', freq='AS',
+                                   tz=tz)
+
+            for rng, expected in [(rng1, expected1), (rng2, expected2),
+                                  (rng3, expected3), (rng4, expected4)]:
+                tm.assert_index_equal(rng, expected)
+
+    def test_dti_constructor_small_int(self):
+        # GH 13721
+        exp = DatetimeIndex(['1970-01-01 00:00:00.00000000',
+                             '1970-01-01 00:00:00.00000001',
+                             '1970-01-01 00:00:00.00000002'])
+
+        for dtype in [np.int64, np.int32, np.int16, np.int8]:
+            arr = np.array([0, 10, 20], dtype=dtype)
+            tm.assert_index_equal(DatetimeIndex(arr), exp)
+
+    def test_ctor_str_intraday(self):
+        rng = DatetimeIndex(['1-1-2000 00:00:01'])
+        self.assertEqual(rng[0].second, 1)
+
+    def test_is_(self):
+        dti = DatetimeIndex(start='1/1/2005', end='12/1/2005', freq='M')
+        self.assertTrue(dti.is_(dti))
+        self.assertTrue(dti.is_(dti.view()))
+        self.assertFalse(dti.is_(dti.copy()))
+
+    def test_index_cast_datetime64_other_units(self):
+        arr = np.arange(0, 100, 10, dtype=np.int64).view('M8[D]')
+        idx = Index(arr)
+
+        self.assertTrue((idx.values == tslib.cast_to_nanoseconds(arr)).all())
+
+    def test_constructor_int64_nocopy(self):
+        # #1624
+        arr = np.arange(1000, dtype=np.int64)
+        index = DatetimeIndex(arr)
+
+        arr[50:100] = -1
+        self.assertTrue((index.asi8[50:100] == -1).all())
+
+        arr = np.arange(1000, dtype=np.int64)
+        index = DatetimeIndex(arr, copy=True)
+
+        arr[50:100] = -1
+        self.assertTrue((index.asi8[50:100] != -1).all())
+
+    def test_from_freq_recreate_from_data(self):
+        freqs = ['M', 'Q', 'A', 'D', 'B', 'BH', 'T', 'S', 'L', 'U', 'H', 'N',
+                 'C']
+
+        for f in freqs:
+            org = DatetimeIndex(start='2001/02/01 09:00', freq=f, periods=1)
+            idx = DatetimeIndex(org, freq=f)
+            tm.assert_index_equal(idx, org)
+
+            org = DatetimeIndex(start='2001/02/01 09:00', freq=f,
+                                tz='US/Pacific', periods=1)
+            idx = DatetimeIndex(org, freq=f, tz='US/Pacific')
+            tm.assert_index_equal(idx, org)
+
+    def test_datetimeindex_constructor_misc(self):
+        arr = ['1/1/2005', '1/2/2005', 'Jn 3, 2005', '2005-01-04']
+        self.assertRaises(Exception, DatetimeIndex, arr)
+
+        arr = ['1/1/2005', '1/2/2005', '1/3/2005', '2005-01-04']
+        idx1 = DatetimeIndex(arr)
+
+        arr = [datetime(2005, 1, 1), '1/2/2005', '1/3/2005', '2005-01-04']
+        idx2 = DatetimeIndex(arr)
+
+        arr = [lib.Timestamp(datetime(2005, 1, 1)), '1/2/2005', '1/3/2005',
+               '2005-01-04']
+        idx3 = DatetimeIndex(arr)
+
+        arr = np.array(['1/1/2005', '1/2/2005', '1/3/2005',
+                        '2005-01-04'], dtype='O')
+        idx4 = DatetimeIndex(arr)
+
+        arr = to_datetime(['1/1/2005', '1/2/2005', '1/3/2005', '2005-01-04'])
+        idx5 = DatetimeIndex(arr)
+
+        arr = to_datetime(['1/1/2005', '1/2/2005', 'Jan 3, 2005', '2005-01-04'
+                           ])
+        idx6 = DatetimeIndex(arr)
+
+        idx7 = DatetimeIndex(['12/05/2007', '25/01/2008'], dayfirst=True)
+        idx8 = DatetimeIndex(['2007/05/12', '2008/01/25'], dayfirst=False,
+                             yearfirst=True)
+        tm.assert_index_equal(idx7, idx8)
+
+        for other in [idx2, idx3, idx4, idx5, idx6]:
+            self.assertTrue((idx1.values == other.values).all())
+
+        sdate = datetime(1999, 12, 25)
+        edate = datetime(2000, 1, 1)
+        idx = DatetimeIndex(start=sdate, freq='1B', periods=20)
+        self.assertEqual(len(idx), 20)
+        self.assertEqual(idx[0], sdate + 0 * offsets.BDay())
+        self.assertEqual(idx.freq, 'B')
+
+        idx = DatetimeIndex(end=edate, freq=('D', 5), periods=20)
+        self.assertEqual(len(idx), 20)
+        self.assertEqual(idx[-1], edate)
+        self.assertEqual(idx.freq, '5D')
+
+        idx1 = DatetimeIndex(start=sdate, end=edate, freq='W-SUN')
+        idx2 = DatetimeIndex(start=sdate, end=edate,
+                             freq=offsets.Week(weekday=6))
+        self.assertEqual(len(idx1), len(idx2))
+        self.assertEqual(idx1.offset, idx2.offset)
+
+        idx1 = DatetimeIndex(start=sdate, end=edate, freq='QS')
+        idx2 = DatetimeIndex(start=sdate, end=edate,
+                             freq=offsets.QuarterBegin(startingMonth=1))
+        self.assertEqual(len(idx1), len(idx2))
+        self.assertEqual(idx1.offset, idx2.offset)
+
+        idx1 = DatetimeIndex(start=sdate, end=edate, freq='BQ')
+        idx2 = DatetimeIndex(start=sdate, end=edate,
+                             freq=offsets.BQuarterEnd(startingMonth=12))
+        self.assertEqual(len(idx1), len(idx2))
+        self.assertEqual(idx1.offset, idx2.offset)

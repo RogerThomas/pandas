@@ -20,10 +20,9 @@ import pandas.core.algorithms as algos
 import pandas.compat as compat
 from pandas.compat.numpy import function as nv
 
-from pandas.lib import Timestamp
-from pandas._period import IncompatibleFrequency
-import pandas.lib as lib
-import pandas.tslib as tslib
+from pandas._libs import lib, tslib
+from pandas._libs.lib import Timestamp
+from pandas._libs.period import IncompatibleFrequency
 
 from pandas.util.decorators import Appender
 from pandas.core.generic import _shared_docs
@@ -221,7 +220,7 @@ class Resampler(_GroupBy):
         -------
         obj : converted object
         """
-        obj = obj.consolidate()
+        obj = obj._consolidate()
         return obj
 
     def _get_binner_for_time(self):
@@ -552,6 +551,8 @@ class Resampler(_GroupBy):
         """
         nv.validate_resampler_func('var', args, kwargs)
         return self._downsample('var', ddof=ddof)
+
+
 Resampler._deprecated_valids += dir(Resampler)
 
 # downsample methods
@@ -969,12 +970,18 @@ def resample(obj, kind=None, **kwds):
     """ create a TimeGrouper and return our resampler """
     tg = TimeGrouper(**kwds)
     return tg._get_resampler(obj, kind=kind)
+
+
 resample.__doc__ = Resampler.__doc__
 
 
 def get_resampler_for_grouping(groupby, rule, how=None, fill_method=None,
                                limit=None, kind=None, **kwargs):
     """ return our appropriate resampler when grouping as well """
+
+    # .resample uses 'on' similar to how .groupby uses 'key'
+    kwargs['key'] = kwargs.pop('on', None)
+
     tg = TimeGrouper(freq=rule, **kwargs)
     resampler = tg._get_resampler(groupby.obj, kind=kind)
     r = resampler._get_resampler_for_grouping(groupby=groupby)
@@ -1374,16 +1381,18 @@ def asfreq(obj, freq, method=None, how=None, normalize=False, fill_value=None):
         if how is None:
             how = 'E'
 
-        new_index = obj.index.asfreq(freq, how=how)
         new_obj = obj.copy()
-        new_obj.index = new_index
-        return new_obj
+        new_obj.index = obj.index.asfreq(freq, how=how)
+
+    elif len(obj.index) == 0:
+        new_obj = obj.copy()
+        new_obj.index = obj.index._shallow_copy(freq=to_offset(freq))
+
     else:
-        if len(obj.index) == 0:
-            return obj.copy()
         dti = date_range(obj.index[0], obj.index[-1], freq=freq)
         dti.name = obj.index.name
-        rs = obj.reindex(dti, method=method, fill_value=fill_value)
+        new_obj = obj.reindex(dti, method=method, fill_value=fill_value)
         if normalize:
-            rs.index = rs.index.normalize()
-        return rs
+            new_obj.index = new_obj.index.normalize()
+
+    return new_obj

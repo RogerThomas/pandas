@@ -2,7 +2,7 @@ from sys import getsizeof
 import operator
 
 import numpy as np
-import pandas.index as _index
+from pandas._libs import index as libindex
 
 from pandas.types.common import (is_integer,
                                  is_scalar,
@@ -39,7 +39,7 @@ class RangeIndex(Int64Index):
     """
 
     _typ = 'rangeindex'
-    _engine_type = _index.Int64Engine
+    _engine_type = libindex.Int64Engine
 
     def __new__(cls, start=None, stop=None, step=None, name=None, dtype=None,
                 fastpath=False, copy=False, **kwargs):
@@ -651,6 +651,7 @@ class RangeIndex(Int64Index):
                 '__div__',
                 reversed=True,
                 step=operator.div)
+
 
 RangeIndex._add_numeric_methods()
 RangeIndex._add_logical_methods()

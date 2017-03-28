@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 # pylint: disable=W0612,E1101
 
+from warnings import catch_warnings
 from datetime import datetime
 
 import operator
-import nose
+import pytest
 
 import numpy as np
 import pandas as pd
@@ -52,7 +53,6 @@ class PanelTests(object):
 
 
 class SafeForLongAndSparse(object):
-    _multiprocess_can_split_ = True
 
     def test_repr(self):
         repr(self.panel)
@@ -98,7 +98,7 @@ class SafeForLongAndSparse(object):
         try:
             from scipy.stats import skew
         except ImportError:
-            raise nose.SkipTest("no scipy.stats.skew")
+            pytest.skip("no scipy.stats.skew")
 
         def this_skew(x):
             if len(x) < 3:
@@ -177,7 +177,6 @@ class SafeForLongAndSparse(object):
 
 
 class SafeForSparse(object):
-    _multiprocess_can_split_ = True
 
     @classmethod
     def assert_panel_equal(cls, x, y):
@@ -421,8 +420,6 @@ class SafeForSparse(object):
 
 
 class CheckIndexing(object):
-
-    _multiprocess_can_split_ = True
 
     def test_getitem(self):
         self.assertRaises(Exception, self.panel.__getitem__, 'ItemQ')
@@ -692,7 +689,7 @@ class CheckIndexing(object):
     def test_ix_align(self):
         from pandas import Series
         b = Series(np.random.randn(10), name=0)
-        b.sort()
+        b.sort_values()
         df_orig = Panel(np.random.randn(3, 10, 2))
         df = df_orig.copy()
 
@@ -869,7 +866,6 @@ tm.add_nans(_panel)
 
 class TestPanel(tm.TestCase, PanelTests, CheckIndexing, SafeForLongAndSparse,
                 SafeForSparse):
-    _multiprocess_can_split_ = True
 
     @classmethod
     def assert_panel_equal(cls, x, y):
@@ -1006,7 +1002,7 @@ class TestPanel(tm.TestCase, PanelTests, CheckIndexing, SafeForLongAndSparse,
         self.panel['foo'] = 1.
         self.assertFalse(self.panel._data.is_consolidated())
 
-        panel = self.panel.consolidate()
+        panel = self.panel._consolidate()
         self.assertTrue(panel._data.is_consolidated())
 
     def test_ctor_dict(self):
@@ -1277,7 +1273,7 @@ class TestPanel(tm.TestCase, PanelTests, CheckIndexing, SafeForLongAndSparse,
         f = lambda x: ((x.T - x.mean(1)) / x.std(1)).T
 
         # make sure that we don't trigger any warnings
-        with tm.assert_produces_warning(False):
+        with catch_warnings(record=True):
             result = self.panel.apply(f, axis=['items', 'major_axis'])
             expected = Panel(dict([(ax, f(self.panel.loc[:, :, ax]))
                                    for ax in self.panel.minor_axis]))
@@ -2064,7 +2060,7 @@ class TestPanel(tm.TestCase, PanelTests, CheckIndexing, SafeForLongAndSparse,
             import openpyxl  # noqa
             from pandas.io.excel import ExcelFile
         except ImportError:
-            raise nose.SkipTest("need xlwt xlrd openpyxl")
+            pytest.skip("need xlwt xlrd openpyxl")
 
         for ext in ['xls', 'xlsx']:
             with ensure_clean('__tmp__.' + ext) as path:
@@ -2072,7 +2068,7 @@ class TestPanel(tm.TestCase, PanelTests, CheckIndexing, SafeForLongAndSparse,
                 try:
                     reader = ExcelFile(path)
                 except ImportError:
-                    raise nose.SkipTest("need xlwt xlrd openpyxl")
+                    pytest.skip("need xlwt xlrd openpyxl")
 
                 for item, df in self.panel.iteritems():
                     recdf = reader.parse(str(item), index_col=0)
@@ -2084,14 +2080,14 @@ class TestPanel(tm.TestCase, PanelTests, CheckIndexing, SafeForLongAndSparse,
             import xlsxwriter  # noqa
             from pandas.io.excel import ExcelFile
         except ImportError:
-            raise nose.SkipTest("Requires xlrd and xlsxwriter. Skipping test.")
+            pytest.skip("Requires xlrd and xlsxwriter. Skipping test.")
 
         with ensure_clean('__tmp__.xlsx') as path:
             self.panel.to_excel(path, engine='xlsxwriter')
             try:
                 reader = ExcelFile(path)
             except ImportError as e:
-                raise nose.SkipTest("cannot write excel file: %s" % e)
+                pytest.skip("cannot write excel file: %s" % e)
 
             for item, df in self.panel.iteritems():
                 recdf = reader.parse(str(item), index_col=0)
@@ -2278,7 +2274,6 @@ class TestLongPanel(tm.TestCase):
     """
     LongPanel no longer exists, but...
     """
-    _multiprocess_can_split_ = True
 
     def setUp(self):
         import warnings
@@ -2538,8 +2533,3 @@ def test_panel_index():
                                        np.repeat([1, 2, 3], 4)],
                                       names=['time', 'panel'])
     tm.assert_index_equal(index, expected)
-
-
-if __name__ == '__main__':
-    nose.runmodule(argv=[__file__, '-vvs', '-x', '--pdb', '--pdb-failure'],
-                   exit=False)

@@ -28,7 +28,18 @@ from .common import TestData
 
 class TestSeriesOperators(TestData, tm.TestCase):
 
-    _multiprocess_can_split_ = True
+    def test_series_comparison_scalars(self):
+        series = Series(date_range('1/1/2000', periods=10))
+
+        val = datetime(2000, 1, 4)
+        result = series > val
+        expected = Series([x > val for x in series])
+        self.assert_series_equal(result, expected)
+
+        val = series[5]
+        result = series > val
+        expected = Series([x > val for x in series])
+        self.assert_series_equal(result, expected)
 
     def test_comparisons(self):
         left = np.random.randn(10)

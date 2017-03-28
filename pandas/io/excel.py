@@ -19,7 +19,7 @@ from pandas.io.common import (_is_url, _urlopen, _validate_header_arg,
                               EmptyDataError, get_filepath_or_buffer,
                               _NA_VALUES)
 from pandas.tseries.period import Period
-from pandas import json
+from pandas.io.json import libjson
 from pandas.compat import (map, zip, reduce, range, lrange, u, add_metaclass,
                            string_types, OrderedDict)
 from pandas.core import config
@@ -343,13 +343,10 @@ class ExcelFile(object):
         if 'chunksize' in kwds:
             raise NotImplementedError("chunksize keyword of read_excel "
                                       "is not implemented")
-        if parse_dates:
-            raise NotImplementedError("parse_dates keyword of read_excel "
-                                      "is not implemented")
 
-        if date_parser is not None:
-            raise NotImplementedError("date_parser keyword of read_excel "
-                                      "is not implemented")
+        if parse_dates is True and index_col is None:
+            warn("The 'parse_dates=True' keyword of read_excel was provided"
+                 " without an 'index_col' keyword value.")
 
         import xlrd
         from xlrd import (xldate, XL_CELL_DATE,
@@ -543,6 +540,22 @@ class ExcelFile(object):
         self.close()
 
 
+def _validate_freeze_panes(freeze_panes):
+    if freeze_panes is not None:
+        if (
+            len(freeze_panes) == 2 and
+            all(isinstance(item, int) for item in freeze_panes)
+        ):
+            return True
+
+        raise ValueError("freeze_panes must be of form (row, column)"
+                         " where row and column are integers")
+
+    # freeze_panes wasn't specified, return False so it won't be applied
+    # to output sheet
+    return False
+
+
 def _trim_excel_header(row):
     # trim header row so auto-index inference works
     # xlrd uses '' , openpyxl None
@@ -693,7 +706,8 @@ class ExcelWriter(object):
         pass
 
     @abc.abstractmethod
-    def write_cells(self, cells, sheet_name=None, startrow=0, startcol=0):
+    def write_cells(self, cells, sheet_name=None, startrow=0, startcol=0,
+                    freeze_panes=None):
         """
         Write given formated cells into Excel an excel sheet
 
@@ -705,6 +719,8 @@ class ExcelWriter(object):
             Name of Excel sheet, if None, then use self.cur_sheet
         startrow: upper left cell row to dump data frame
         startcol: upper left cell column to dump data frame
+        freeze_panes: integer tuple of length 2
+            contains the bottom-most row and right-most column to freeze
         """
         pass
 
@@ -804,7 +820,8 @@ class _Openpyxl1Writer(ExcelWriter):
         """
         return self.book.save(self.path)
 
-    def write_cells(self, cells, sheet_name=None, startrow=0, startcol=0):
+    def write_cells(self, cells, sheet_name=None, startrow=0, startcol=0,
+                    freeze_panes=None):
         # Write the frame cells using openpyxl.
         from openpyxl.cell import get_column_letter
 
@@ -886,11 +903,13 @@ class _Openpyxl1Writer(ExcelWriter):
 
         return xls_style
 
+
 register_writer(_Openpyxl1Writer)
 
 
 class _OpenpyxlWriter(_Openpyxl1Writer):
     engine = 'openpyxl'
+
 
 register_writer(_OpenpyxlWriter)
 
@@ -902,7 +921,8 @@ class _Openpyxl20Writer(_Openpyxl1Writer):
     engine = 'openpyxl20'
     openpyxl_majorver = 2
 
-    def write_cells(self, cells, sheet_name=None, startrow=0, startcol=0):
+    def write_cells(self, cells, sheet_name=None, startrow=0, startcol=0,
+                    freeze_panes=None):
         # Write the frame cells using openpyxl.
         from openpyxl.cell import get_column_letter
 
@@ -1309,7 +1329,8 @@ class _Openpyxl22Writer(_Openpyxl20Writer):
     engine = 'openpyxl22'
     openpyxl_majorver = 2
 
-    def write_cells(self, cells, sheet_name=None, startrow=0, startcol=0):
+    def write_cells(self, cells, sheet_name=None, startrow=0, startcol=0,
+                    freeze_panes=None):
         # Write the frame cells using openpyxl.
         sheet_name = self._get_sheet_name(sheet_name)
 
@@ -1321,6 +1342,10 @@ class _Openpyxl22Writer(_Openpyxl20Writer):
             wks = self.book.create_sheet()
             wks.title = sheet_name
             self.sheets[sheet_name] = wks
+
+        if _validate_freeze_panes(freeze_panes):
+            wks.freeze_panes = wks.cell(row=freeze_panes[0] + 1,
+                                        column=freeze_panes[1] + 1)
 
         for cell in cells:
             xcell = wks.cell(
@@ -1368,6 +1393,7 @@ class _Openpyxl22Writer(_Openpyxl20Writer):
                             for k, v in style_kwargs.items():
                                 setattr(xcell, k, v)
 
+
 register_writer(_Openpyxl22Writer)
 
 
@@ -1393,7 +1419,8 @@ class _XlwtWriter(ExcelWriter):
         """
         return self.book.save(self.path)
 
-    def write_cells(self, cells, sheet_name=None, startrow=0, startcol=0):
+    def write_cells(self, cells, sheet_name=None, startrow=0, startcol=0,
+                    freeze_panes=None):
         # Write the frame cells using xlwt.
 
         sheet_name = self._get_sheet_name(sheet_name)
@@ -1403,6 +1430,11 @@ class _XlwtWriter(ExcelWriter):
         else:
             wks = self.book.add_sheet(sheet_name)
             self.sheets[sheet_name] = wks
+
+        if _validate_freeze_panes(freeze_panes):
+            wks.set_panes_frozen(True)
+            wks.set_horz_split_pos(freeze_panes[0])
+            wks.set_vert_split_pos(freeze_panes[1])
 
         style_dict = {}
 
@@ -1415,7 +1447,7 @@ class _XlwtWriter(ExcelWriter):
             elif isinstance(cell.val, date):
                 num_format_str = self.date_format
 
-            stylekey = json.dumps(cell.style)
+            stylekey = libjson.dumps(cell.style)
             if num_format_str:
                 stylekey += num_format_str
 
@@ -1491,6 +1523,7 @@ class _XlwtWriter(ExcelWriter):
 
         return style
 
+
 register_writer(_XlwtWriter)
 
 
@@ -1514,11 +1547,12 @@ class _XlsxWriter(ExcelWriter):
         """
         Save workbook to disk.
         """
+
         return self.book.close()
 
-    def write_cells(self, cells, sheet_name=None, startrow=0, startcol=0):
+    def write_cells(self, cells, sheet_name=None, startrow=0, startcol=0,
+                    freeze_panes=None):
         # Write the frame cells using xlsxwriter.
-
         sheet_name = self._get_sheet_name(sheet_name)
 
         if sheet_name in self.sheets:
@@ -1529,6 +1563,9 @@ class _XlsxWriter(ExcelWriter):
 
         style_dict = {}
 
+        if _validate_freeze_panes(freeze_panes):
+            wks.freeze_panes(*(freeze_panes))
+
         for cell in cells:
             val = _conv_value(cell.val)
 
@@ -1538,7 +1575,7 @@ class _XlsxWriter(ExcelWriter):
             elif isinstance(cell.val, date):
                 num_format_str = self.date_format
 
-            stylekey = json.dumps(cell.style)
+            stylekey = libjson.dumps(cell.style)
             if num_format_str:
                 stylekey += num_format_str
 
@@ -1602,5 +1639,6 @@ class _XlsxWriter(ExcelWriter):
             xl_format.set_border()
 
         return xl_format
+
 
 register_writer(_XlsxWriter)

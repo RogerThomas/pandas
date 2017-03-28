@@ -4,39 +4,49 @@
 import pytz
 from datetime import timedelta, datetime
 
+from distutils.version import LooseVersion
 from numpy import nan
 import numpy as np
 import pandas as pd
 
-from pandas import (Series, isnull, date_range,
-                    MultiIndex, Index)
-from pandas.tseries.index import Timestamp
+from pandas import (Series, DataFrame, isnull, date_range,
+                    MultiIndex, Index, Timestamp, NaT)
 from pandas.compat import range
-from pandas.util.testing import assert_series_equal
+from pandas._libs.tslib import iNaT
+from pandas.util.testing import assert_series_equal, assert_frame_equal
 import pandas.util.testing as tm
 
 from .common import TestData
+
+try:
+    import scipy
+    _is_scipy_ge_0190 = scipy.__version__ >= LooseVersion('0.19.0')
+except:
+    _is_scipy_ge_0190 = False
 
 
 def _skip_if_no_pchip():
     try:
         from scipy.interpolate import pchip_interpolate  # noqa
     except ImportError:
-        import nose
-        raise nose.SkipTest('scipy.interpolate.pchip missing')
+        import pytest
+        pytest.skip('scipy.interpolate.pchip missing')
 
 
 def _skip_if_no_akima():
     try:
         from scipy.interpolate import Akima1DInterpolator  # noqa
     except ImportError:
-        import nose
-        raise nose.SkipTest('scipy.interpolate.Akima1DInterpolator missing')
+        import pytest
+        pytest.skip('scipy.interpolate.Akima1DInterpolator missing')
+
+
+def _simple_ts(start, end, freq='D'):
+    rng = date_range(start, end, freq=freq)
+    return Series(np.random.randn(len(rng)), index=rng)
 
 
 class TestSeriesMissingData(TestData, tm.TestCase):
-
-    _multiprocess_can_split_ = True
 
     def test_timedelta_fillna(self):
         # GH 3371
@@ -66,9 +76,8 @@ class TestSeriesMissingData(TestData, tm.TestCase):
                            timedelta(days=1, seconds=9 * 3600 + 60 + 1)])
         assert_series_equal(result, expected)
 
-        from pandas import tslib
-        result = td.fillna(tslib.NaT)
-        expected = Series([tslib.NaT, timedelta(0), timedelta(1),
+        result = td.fillna(NaT)
+        expected = Series([NaT, timedelta(0), timedelta(1),
                            timedelta(days=1, seconds=9 * 3600 + 60 + 1)],
                           dtype='m8[ns]')
         assert_series_equal(result, expected)
@@ -99,8 +108,7 @@ class TestSeriesMissingData(TestData, tm.TestCase):
             '20130101'), Timestamp('20130104'), Timestamp('20130103 9:01:01')])
         assert_series_equal(result, expected)
 
-        from pandas import tslib
-        result = s.fillna(tslib.NaT)
+        result = s.fillna(NaT)
         expected = s
         assert_series_equal(result, expected)
 
@@ -268,6 +276,20 @@ class TestSeriesMissingData(TestData, tm.TestCase):
 
         assert_series_equal(filled, expected)
 
+    def test_fillna_downcast(self):
+        # GH 15277
+        # infer int64 from float64
+        s = pd.Series([1., np.nan])
+        result = s.fillna(0, downcast='infer')
+        expected = pd.Series([1, 0])
+        assert_series_equal(result, expected)
+
+        # infer int64 from float64 when fillna value is a dict
+        s = pd.Series([1., np.nan])
+        result = s.fillna({1: 0}, downcast='infer')
+        expected = pd.Series([1, 0])
+        assert_series_equal(result, expected)
+
     def test_fillna_int(self):
         s = Series(np.random.randint(-100, 100, 50))
         s.fillna(method='ffill', inplace=True)
@@ -277,6 +299,50 @@ class TestSeriesMissingData(TestData, tm.TestCase):
         s = Series(np.random.randint(-100, 100, 50))
         self.assertRaises(TypeError, s.fillna, [1, 2])
         self.assertRaises(TypeError, s.fillna, (1, 2))
+
+        # related GH 9217, make sure limit is an int and greater than 0
+        s = Series([1, 2, 3, None])
+        for limit in [-1, 0, 1., 2.]:
+            for method in ['backfill', 'bfill', 'pad', 'ffill', None]:
+                with tm.assertRaises(ValueError):
+                    s.fillna(1, limit=limit, method=method)
+
+    def test_fillna_nat(self):
+        series = Series([0, 1, 2, iNaT], dtype='M8[ns]')
+
+        filled = series.fillna(method='pad')
+        filled2 = series.fillna(value=series.values[2])
+
+        expected = series.copy()
+        expected.values[3] = expected.values[2]
+
+        assert_series_equal(filled, expected)
+        assert_series_equal(filled2, expected)
+
+        df = DataFrame({'A': series})
+        filled = df.fillna(method='pad')
+        filled2 = df.fillna(value=series.values[2])
+        expected = DataFrame({'A': expected})
+        assert_frame_equal(filled, expected)
+        assert_frame_equal(filled2, expected)
+
+        series = Series([iNaT, 0, 1, 2], dtype='M8[ns]')
+
+        filled = series.fillna(method='bfill')
+        filled2 = series.fillna(value=series[1])
+
+        expected = series.copy()
+        expected[0] = expected[1]
+
+        assert_series_equal(filled, expected)
+        assert_series_equal(filled2, expected)
+
+        df = DataFrame({'A': series})
+        filled = df.fillna(method='bfill')
+        filled2 = df.fillna(value=series[1])
+        expected = DataFrame({'A': expected})
+        assert_frame_equal(filled, expected)
+        assert_frame_equal(filled2, expected)
 
     def test_isnull_for_inf(self):
         s = Series(['a', np.inf, np.nan, 1.0])
@@ -399,26 +465,25 @@ class TestSeriesMissingData(TestData, tm.TestCase):
 
     def test_timedelta64_nan(self):
 
-        from pandas import tslib
         td = Series([timedelta(days=i) for i in range(10)])
 
         # nan ops on timedeltas
         td1 = td.copy()
         td1[0] = np.nan
         self.assertTrue(isnull(td1[0]))
-        self.assertEqual(td1[0].value, tslib.iNaT)
+        self.assertEqual(td1[0].value, iNaT)
         td1[0] = td[0]
         self.assertFalse(isnull(td1[0]))
 
-        td1[1] = tslib.iNaT
+        td1[1] = iNaT
         self.assertTrue(isnull(td1[1]))
-        self.assertEqual(td1[1].value, tslib.iNaT)
+        self.assertEqual(td1[1].value, iNaT)
         td1[1] = td[1]
         self.assertFalse(isnull(td1[1]))
 
-        td1[2] = tslib.NaT
+        td1[2] = NaT
         self.assertTrue(isnull(td1[2]))
-        self.assertEqual(td1[2].value, tslib.iNaT)
+        self.assertEqual(td1[2].value, iNaT)
         td1[2] = td[2]
         self.assertFalse(isnull(td1[2]))
 
@@ -513,6 +578,14 @@ class TestSeriesMissingData(TestData, tm.TestCase):
         assert_series_equal(x[1:], expected[1:])
         self.assertTrue(np.isnan(x[0]), np.isnan(expected[0]))
 
+    def test_pad_require_monotonicity(self):
+        rng = date_range('1/1/2000', '3/1/2000', freq='B')
+
+        # neither monotonic increasing or decreasing
+        rng2 = rng[[1, 0, 2]]
+
+        self.assertRaises(ValueError, rng2.get_indexer, rng, method='pad')
+
     def test_dropna_preserve_name(self):
         self.ts[:5] = np.nan
         result = self.ts.dropna()
@@ -529,6 +602,79 @@ class TestSeriesMissingData(TestData, tm.TestCase):
         exp = s.fillna(0).add(2)
         res = s.add(2, fill_value=0)
         assert_series_equal(res, exp)
+
+    def test_series_fillna_limit(self):
+        index = np.arange(10)
+        s = Series(np.random.randn(10), index=index)
+
+        result = s[:2].reindex(index)
+        result = result.fillna(method='pad', limit=5)
+
+        expected = s[:2].reindex(index).fillna(method='pad')
+        expected[-3:] = np.nan
+        assert_series_equal(result, expected)
+
+        result = s[-2:].reindex(index)
+        result = result.fillna(method='bfill', limit=5)
+
+        expected = s[-2:].reindex(index).fillna(method='backfill')
+        expected[:3] = np.nan
+        assert_series_equal(result, expected)
+
+    def test_sparse_series_fillna_limit(self):
+        index = np.arange(10)
+        s = Series(np.random.randn(10), index=index)
+
+        ss = s[:2].reindex(index).to_sparse()
+        result = ss.fillna(method='pad', limit=5)
+        expected = ss.fillna(method='pad', limit=5)
+        expected = expected.to_dense()
+        expected[-3:] = np.nan
+        expected = expected.to_sparse()
+        assert_series_equal(result, expected)
+
+        ss = s[-2:].reindex(index).to_sparse()
+        result = ss.fillna(method='backfill', limit=5)
+        expected = ss.fillna(method='backfill')
+        expected = expected.to_dense()
+        expected[:3] = np.nan
+        expected = expected.to_sparse()
+        assert_series_equal(result, expected)
+
+    def test_sparse_series_pad_backfill_limit(self):
+        index = np.arange(10)
+        s = Series(np.random.randn(10), index=index)
+        s = s.to_sparse()
+
+        result = s[:2].reindex(index, method='pad', limit=5)
+        expected = s[:2].reindex(index).fillna(method='pad')
+        expected = expected.to_dense()
+        expected[-3:] = np.nan
+        expected = expected.to_sparse()
+        assert_series_equal(result, expected)
+
+        result = s[-2:].reindex(index, method='backfill', limit=5)
+        expected = s[-2:].reindex(index).fillna(method='backfill')
+        expected = expected.to_dense()
+        expected[:3] = np.nan
+        expected = expected.to_sparse()
+        assert_series_equal(result, expected)
+
+    def test_series_pad_backfill_limit(self):
+        index = np.arange(10)
+        s = Series(np.random.randn(10), index=index)
+
+        result = s[:2].reindex(index, method='pad', limit=5)
+
+        expected = s[:2].reindex(index).fillna(method='pad')
+        expected[-3:] = np.nan
+        assert_series_equal(result, expected)
+
+        result = s[-2:].reindex(index, method='backfill', limit=5)
+
+        expected = s[-2:].reindex(index).fillna(method='backfill')
+        expected[:3] = np.nan
+        assert_series_equal(result, expected)
 
 
 class TestSeriesInterpolateData(TestData, tm.TestCase):
@@ -689,6 +835,7 @@ class TestSeriesInterpolateData(TestData, tm.TestCase):
 
     def test_interp_scipy_basic(self):
         tm._skip_if_no_scipy()
+
         s = Series([1, 3, np.nan, 12, np.nan, 25])
         # slinear
         expected = Series([1., 3., 7.5, 12., 18.5, 25.])
@@ -712,7 +859,13 @@ class TestSeriesInterpolateData(TestData, tm.TestCase):
         result = s.interpolate(method='zero', downcast='infer')
         assert_series_equal(result, expected)
         # quadratic
-        expected = Series([1, 3., 6.769231, 12., 18.230769, 25.])
+        # GH #15662.
+        # new cubic and quadratic interpolation algorithms from scipy 0.19.0.
+        # previously `splmake` was used. See scipy/scipy#6710
+        if _is_scipy_ge_0190:
+            expected = Series([1, 3., 6.823529, 12., 18.058824, 25.])
+        else:
+            expected = Series([1, 3., 6.769231, 12., 18.230769, 25.])
         result = s.interpolate(method='quadratic')
         assert_series_equal(result, expected)
 
@@ -729,6 +882,17 @@ class TestSeriesInterpolateData(TestData, tm.TestCase):
         expected = Series([1., 3., 5., 7., np.nan, 11.])
         result = s.interpolate(method='linear', limit=2)
         assert_series_equal(result, expected)
+
+        # GH 9217, make sure limit is an int and greater than 0
+        methods = ['linear', 'time', 'index', 'values', 'nearest', 'zero',
+                   'slinear', 'quadratic', 'cubic', 'barycentric', 'krogh',
+                   'polynomial', 'spline', 'piecewise_polynomial', None,
+                   'from_derivatives', 'pchip', 'akima']
+        s = pd.Series([1, 2, np.nan, np.nan, 5])
+        for limit in [-1, 0, 1., 2.]:
+            for method in methods:
+                with tm.assertRaises(ValueError):
+                    s.interpolate(limit=limit, method=method)
 
     def test_interp_limit_forward(self):
         s = Series([1, 3, np.nan, np.nan, np.nan, 11])
@@ -877,8 +1041,8 @@ class TestSeriesInterpolateData(TestData, tm.TestCase):
 
     def test_spline_extrapolate(self):
         tm.skip_if_no_package(
-            'scipy', '0.15',
-            'setting ext on scipy.interpolate.UnivariateSpline')
+            'scipy', min_version='0.15',
+            app='setting ext on scipy.interpolate.UnivariateSpline')
         s = Series([1, 2, 3, 4, np.nan, 6, np.nan])
         result3 = s.interpolate(method='spline', order=1, ext=3)
         expected3 = Series([1., 2., 3., 4., 5., 6., 6.])
@@ -932,8 +1096,26 @@ class TestSeriesInterpolateData(TestData, tm.TestCase):
                           index=pd.to_timedelta([1, 2, 4]))
         assert_series_equal(result, expected)
 
-if __name__ == '__main__':
-    import nose
-    nose.runmodule(argv=[__file__, '-vvs', '-x', '--pdb', '--pdb-failure'],
-                   # '--with-coverage', '--cover-package=pandas.core']
-                   exit=False)
+    def test_series_interpolate_method_values(self):
+        # #1646
+        ts = _simple_ts('1/1/2000', '1/20/2000')
+        ts[::2] = np.nan
+
+        result = ts.interpolate(method='values')
+        exp = ts.interpolate()
+        assert_series_equal(result, exp)
+
+    def test_series_interpolate_intraday(self):
+        # #1698
+        index = pd.date_range('1/1/2012', periods=4, freq='12D')
+        ts = pd.Series([0, 12, 24, 36], index)
+        new_index = index.append(index + pd.DateOffset(days=1)).sort_values()
+
+        exp = ts.reindex(new_index).interpolate(method='time')
+
+        index = pd.date_range('1/1/2012', periods=4, freq='12H')
+        ts = pd.Series([0, 12, 24, 36], index)
+        new_index = index.append(index + pd.DateOffset(hours=1)).sort_values()
+        result = ts.reindex(new_index).interpolate(method='time')
+
+        self.assert_numpy_array_equal(result.values, exp.values)
