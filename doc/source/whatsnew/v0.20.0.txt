@@ -300,9 +300,9 @@ Other Enhancements
 - ``pd.DataFrame.plot`` now prints a title above each subplot if ``suplots=True`` and ``title`` is a list of strings (:issue:`14753`)
 - ``pd.Series.interpolate`` now supports timedelta as an index type with ``method='time'`` (:issue:`6424`)
 - ``Timedelta.isoformat`` method added for formatting Timedeltas as an `ISO 8601 duration`_. See the :ref:`Timedelta docs <timedeltas.isoformat>` (:issue:`15136`)
-- ``pandas.io.json.json_normalize()`` gained the option ``errors='ignore'|'raise'``; the default is ``errors='raise'`` which is backward compatible. (:issue:`14583`)
 - ``.select_dtypes()`` now allows the string 'datetimetz' to generically select datetimes with tz (:issue:`14910`)
 - The ``.to_latex()`` method will now accept ``multicolumn`` and ``multirow`` arguments to use the accompanying LaTeX enhancements
+
 - ``pd.merge_asof()`` gained the option ``direction='backward'|'forward'|'nearest'`` (:issue:`14887`)
 - ``Series/DataFrame.asfreq()`` have gained a ``fill_value`` parameter, to fill missing values (:issue:`3715`).
 - ``Series/DataFrame.resample.asfreq`` have gained a ``fill_value`` parameter, to fill missing values during resampling (:issue:`3715`).
@@ -313,10 +313,14 @@ Other Enhancements
 
 - ``pd.TimedeltaIndex`` now has a custom datetick formatter specifically designed for nanosecond level precision (:issue:`8711`)
 - ``pd.types.concat.union_categoricals`` gained the ``ignore_ordered`` argument to allow ignoring the ordered attribute of unioned categoricals (:issue:`13410`). See the :ref:`categorical union docs <categorical.union>` for more information.
-- ``pandas.io.json.json_normalize()`` with an empty ``list`` will return an empty ``DataFrame`` (:issue:`15534`)
 - ``pd.DataFrame.to_latex`` and ``pd.DataFrame.to_string`` now allow optional header aliases. (:issue:`15536`)
 - Re-enable the ``parse_dates`` keyword of ``read_excel`` to parse string columns as dates (:issue:`14326`)
 - Added ``.empty`` property to subclasses of ``Index``. (:issue:`15270`)
+
+- ``pandas.io.json.json_normalize()`` gained the option ``errors='ignore'|'raise'``; the default is ``errors='raise'`` which is backward compatible. (:issue:`14583`)
+- ``pandas.io.json.json_normalize()`` with an empty ``list`` will return an empty ``DataFrame`` (:issue:`15534`)
+- ``pandas.io.json.json_normalize()`` has gained a ``sep`` option that accepts ``str`` to separate joined fields; the default is ".", which is backward compatible. (:issue:`14883`)
+
 
 .. _ISO 8601 duration: https://en.wikipedia.org/wiki/ISO_8601#Durations
 
@@ -746,6 +750,62 @@ New Behavior:
    TypeError: Cannot compare 2014-01-01 00:00:00 of
    type <class 'pandas.tslib.Timestamp'> to string column
 
+.. _whatsnew_0200.api_breaking.index_order:
+
+Index.intersection and inner join now preserve the order of the left Index
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+`:meth:Index.intersection` now preserves the order of the calling ``Index`` (left)
+instead of the other ``Index`` (right) (:issue:`15582`). This affects the inner
+joins (`:meth:DataFrame.join` and `:func:merge`) and the ``.align`` methods.
+
+- ``Index.intersection``
+
+  .. ipython:: python
+
+     left = pd.Index([2, 1, 0])
+     left
+     right = pd.Index([1, 2, 3])
+     right
+
+  Previous Behavior:
+
+  .. code-block:: ipython
+
+     In [4]: left.intersection(right)
+     Out[4]: Int64Index([1, 2], dtype='int64')
+
+  New Behavior:
+
+  .. ipython:: python
+
+     left.intersection(right)
+
+- ``DataFrame.join`` and ``pd.merge``
+
+  .. ipython:: python
+
+     left = pd.DataFrame({'a': [20, 10, 0]}, index=[2, 1, 0])
+     left
+     right = pd.DataFrame({'b': [100, 200, 300]}, index=[1, 2, 3])
+     right
+
+  Previous Behavior:
+
+  .. code-block:: ipython
+
+     In [4]: left.join(right, how='inner')
+     Out[4]:
+         a    b
+     1  10  100
+     2  20  200
+
+  New Behavior:
+
+  .. ipython:: python
+
+     left.join(right, how='inner')
+
 
 .. _whatsnew_0200.api:
 
@@ -883,6 +943,7 @@ Bug Fixes
 
 - Compat for 32-bit platforms for ``.qcut/cut``; bins will now be ``int64`` dtype (:issue:`14866`)
 
+- Properly set ``__name__`` and ``__qualname__`` for ``Groupby.*`` functions (:issue:`14620`)
 - Bug in ``.at`` when selecting from a tz-aware column (:issue:`15822`)
 - Bug in the display of ``.info()`` where a qualifier (+) would always be displayed with a ``MultiIndex`` that contains only non-strings (:issue:`15245`)
 - Bug in ``.replace()`` may result in incorrect dtypes. (:issue:`12747`, :issue:`15765`)
@@ -979,6 +1040,7 @@ Bug Fixes
 
 - Bug in ``DataFrame.to_stata()`` and ``StataWriter`` which produces incorrectly formatted files to be produced for some locales (:issue:`13856`)
 - Bug in ``StataReader`` and ``StataWriter`` which allows invalid encodings (:issue:`15723`)
+- Bug with ``sort=True`` in ``DataFrame.join`` and ``pd.merge`` when joining on indexes (:issue:`15582`)
 
 - Bug in ``pd.concat()`` in which concatting with an empty dataframe with ``join='inner'`` was being improperly handled (:issue:`15328`)
 - Bug in ``groupby.agg()`` incorrectly localizing timezone on ``datetime`` (:issue:`15426`, :issue:`10668`, :issue:`13046`)
