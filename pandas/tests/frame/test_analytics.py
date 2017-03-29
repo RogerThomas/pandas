@@ -1174,6 +1174,51 @@ class TestDataFrameAnalytics(tm.TestCase, TestData):
 
     def test_nsmallest_nlargest_duplicate_index(self):
         # GH 13412
+        df = pd.DataFrame({'a': [1, 2, 3, 3, 3],
+                           'b': [1, 1, 1, 1, 1],
+                           'c': [0, 1, 2, 5, 4]},
+                          index=[0, 0, 1, 1, 1])
+        def do1(df, n, fields):
+            cur_filter = None
+            tmp_index = pd.Series(df.index)
+            df.reset_index(inplace=True, drop=True)
+            for field in fields:
+                if cur_filter is not None:
+                    n_series = df[field].ix[cur_filter].nsmallest(n)
+                else:
+                    n_series = df[field].nsmallest(n)
+
+                df_filtered = df[field].isin(n_series)
+                cur_filter = df_filtered[df_filtered].index
+                if len(n_series) == df_filtered.sum():
+                    break
+            df = df.ix[cur_filter]
+            df.index = tmp_index[cur_filter]
+            return df
+        def do(df, n, fields):
+            cur_filter = None
+            for field in fields:
+                if cur_filter is not None:
+                    n_series = df[field][cur_filter].nsmallest(n)
+                else:
+                    n_series = df[field].nsmallest(n)
+
+                cur_filter = df[field].isin(n_series)
+                if len(n_series) == cur_filter.sum():
+                    break
+            return df[cur_filter]
+
+        d = do(df, 4, ['a', 'b', 'c'])
+        print(d)
+        print('----------')
+        print(df)
+        1 / 0
+        n_series = df['a'].nsmallest(3)
+        print(df[n_series.index.values])
+        df_filtered_count = df['a'].isin(n_series).sum()
+        print(len(n_series) < df_filtered_count)
+        1 / 0
+        return
         df = pd.DataFrame({'a': [1, 2, 3, 4],
                            'b': [4, 3, 2, 1],
                            'c': [0, 1, 2, 3]},
@@ -1184,6 +1229,8 @@ class TestDataFrameAnalytics(tm.TestCase, TestData):
 
         result = df.nlargest(4, 'a')
         expected = df.sort_values('a', ascending=False).head(4)
+        print(result)
+        print(expected)
         tm.assert_frame_equal(result, expected)
 
         result = df.nsmallest(4, ['a', 'c'])
