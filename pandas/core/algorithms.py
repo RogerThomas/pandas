@@ -944,19 +944,23 @@ def select_n_frame(frame, columns, n, method, keep):
     -------
     nordered : DataFrame
     """
-    from pandas.core.series import Series
     if not is_list_like(columns):
         columns = [columns]
-    columns = list(columns)
-    tmp = Series(frame.index)
-    frame.reset_index(inplace=True, drop=True)
-    ser = getattr(frame[columns[0]], method)(n, keep=keep)
-    if isinstance(ser, Series):
-        ser = ser.to_frame()
-    ret = frame.ix[ser.index]
-    frame.index = tmp
-    ret.index = tmp.align(ser, axis=0, join='inner')[0]
-    return ret
+    else:
+        columns = list(columns)
+    reverse = True if method == 'nlargest' else False
+    for column in columns:
+        series = frame[column]
+        if reverse:
+            inds = series.argsort()[::-1][:n]
+        else:
+            inds = series.argsort()[:n]
+        values = series.take(inds)
+        if values.duplicated().any():
+            frame = frame[series.isin(values)]
+        else:
+            break
+    return frame.take(inds)
 
 
 def _finalize_nsmallest(arr, kth_val, n, keep, narr):
