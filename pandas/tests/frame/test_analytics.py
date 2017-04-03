@@ -1984,16 +1984,15 @@ class TestNLargestNSmallest(object):
                      'timedelta'])
         columns_with_errors = {'category_string', 'string'}
         columns_without_errors = list(set(df) - columns_with_errors)
-        for column in columns_with_errors:
-            dtype = df[column].dtype
-            for columns in (column, ['group', column]):
-                msg_template = "Cannot use method '%s' with dtype %s"
+        methods = 'nsmallest', 'nlargest'
+        for col in columns_with_errors:
+            for method, cols in product(methods, (col, ['group', col])):
                 with pytest.raises(TypeError) as exc_info:
-                    df.nsmallest(2, columns)
-                assert exc_info.value, msg_template % ('nsmallest', dtype)
-                with pytest.raises(TypeError) as exc_info:
-                    df.nlargest(2, columns)
-                assert exc_info.value, msg_template % ('nlargest', dtype)
+                    getattr(df, method)(2, cols)
+                msg = "Cannot use method '%s' with dtype %s" % (
+                    method, df[col].dtype
+                )
+                assert exc_info.value, msg
         df.nsmallest(2, columns_without_errors)
         df.nsmallest(2, ['int', 'string'])  # int column is unique => OK
 
