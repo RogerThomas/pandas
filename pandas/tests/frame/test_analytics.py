@@ -1966,12 +1966,35 @@ class TestNLargestNSmallest(object):
             tm.assert_frame_equal(result, expected)
 
     def test_n_error(self, df_strings):
-        # b alone raises a TypeError
-        df = df_strings
-        with pytest.raises(TypeError):
-            df.nsmallest(1, 'b')
-        with pytest.raises(TypeError):
-            df.nlargest(1, 'b')
+        df = pd.DataFrame(
+            {'group': [1, 1, 2],
+             'int': [1, 2, 3],
+             'float': [4., 5., 6.],
+             'string': list('abc'),
+             'category_string': pd.Series(list('abc')).astype('category'),
+             'category_int': [7, 8, 9],
+             'datetime': pd.date_range('20130101', periods=3),
+             'datetimetz': pd.date_range('20130101',
+                                         periods=3,
+                                         tz='US/Eastern'),
+             'timedelta': pd.timedelta_range('1 s', periods=3, freq='s')},
+            columns=['group', 'int', 'float', 'string',
+                     'category_string', 'category_int',
+                     'datetime', 'datetimetz',
+                     'timedelta'])
+        columns_with_errors = {'category_string', 'string'}
+        columns_without_errors = list(set(df) - columns_with_errors)
+        for column in columns_with_errors:
+            with pytest.raises(TypeError):
+                df.nsmallest(2, column)
+            with pytest.raises(TypeError):
+                df.nsmallest(2, ['group', column])
+            with pytest.raises(TypeError):
+                df.nlargest(2, column)
+            with pytest.raises(TypeError):
+                df.nlargest(2, ['group', column])
+        df.nsmallest(2, columns_without_errors)
+        df.nsmallest(2, ['int', 'string'])  # int column is unique => OK
 
     def test_n_identical_values(self):
         # GH15297
