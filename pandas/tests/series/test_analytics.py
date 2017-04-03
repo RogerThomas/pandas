@@ -1667,7 +1667,9 @@ class TestNLargestNSmallest(object):
               Series([3., 2, 1, 2, 5], dtype='object'),
               # not supported on some archs
               # Series([3., 2, 1, 2, 5], dtype='complex256'),
-              Series([3., 2, 1, 2, 5], dtype='complex128')])
+              Series([3., 2, 1, 2, 5], dtype='complex128'),
+              Series(list('abcde'), dtype='category'),
+              Series(list('abcde'))])
     def test_error(self, r):
         dt = r.dtype
         msg = "Cannot use method 'n(larg|small)est' with dtype %s" % dt
