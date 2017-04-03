@@ -1985,14 +1985,11 @@ class TestNLargestNSmallest(object):
         columns_with_errors = {'category_string', 'string'}
         columns_without_errors = list(set(df) - columns_with_errors)
         for column in columns_with_errors:
-            with pytest.raises(TypeError):
-                df.nsmallest(2, column)
-            with pytest.raises(TypeError):
-                df.nsmallest(2, ['group', column])
-            with pytest.raises(TypeError):
-                df.nlargest(2, column)
-            with pytest.raises(TypeError):
-                df.nlargest(2, ['group', column])
+            for columns in (column, ['group', column]):
+                with pytest.raises(TypeError):
+                    df.nsmallest(2, columns)
+                with pytest.raises(TypeError):
+                    df.nlargest(2, columns)
         df.nsmallest(2, columns_without_errors)
         df.nsmallest(2, ['int', 'string'])  # int column is unique => OK
 
