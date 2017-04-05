@@ -1966,13 +1966,9 @@ class TestNLargestNSmallest(object):
 
             # Only expect error when 'b' is first in order, as 'a' and 'c' are
             # unique
-            error_msg = (
-                "'b' has dtype: object, cannot use method 'nsmallest' "
-                "with this dtype"
-            )
-            with pytest.raises(TypeError) as exc_info:
+            error_msg = "Cannot use method '%s' with dtype object" % method
+            with tm.assertRaisesRegexp(TypeError, error_msg):
                 getattr(df, method)(n, order)
-            assert exc_info.value, error_msg
         else:
             ascending = method == 'nsmallest'
             result = getattr(df, method)(n, order)
@@ -1986,12 +1982,11 @@ class TestNLargestNSmallest(object):
                 ))
     def test_n_error(self, df_main_dtypes, method, columns):
         df = df_main_dtypes
-        with pytest.raises(TypeError) as exc_info:
+        msg = "Cannot use method '%s' with dtype %s" % (
+            method, df[columns[1]].dtype
+        )
+        with tm.assertRaisesRegexp(TypeError, msg):
             getattr(df, method)(2, columns)
-            msg = "Cannot use method '%s' with dtype %s" % (
-                method, df[columns[1]].dtype
-            )
-            assert exc_info.value, msg
 
     def test_n_all_dtypes(self, df_main_dtypes):
         df = df_main_dtypes
