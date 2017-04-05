@@ -1916,13 +1916,33 @@ def df_strings():
                          'c': np.random.permutation(10).astype('float64')})
 
 
+@pytest.fixture
+def df_main_dtypes():
+    return pd.DataFrame(
+        {'group': [1, 1, 2],
+         'int': [1, 2, 3],
+         'float': [4., 5., 6.],
+         'string': list('abc'),
+         'category_string': pd.Series(list('abc')).astype('category'),
+         'category_int': [7, 8, 9],
+         'datetime': pd.date_range('20130101', periods=3),
+         'datetimetz': pd.date_range('20130101',
+                                     periods=3,
+                                     tz='US/Eastern'),
+         'timedelta': pd.timedelta_range('1 s', periods=3, freq='s')},
+        columns=['group', 'int', 'float', 'string',
+                 'category_string', 'category_int',
+                 'datetime', 'datetimetz',
+                 'timedelta'])
+
+
 class TestNLargestNSmallest(object):
 
     # ----------------------------------------------------------------------
     # Top / bottom
     @pytest.mark.parametrize(
-        'n, order',
-        product(range(1, 11),
+        'method, n, order',
+        product(['nsmallest', 'nlargest'], range(1, 11),
                 [['a'],
                  ['c'],
                  ['a', 'b'],
@@ -1939,62 +1959,46 @@ class TestNLargestNSmallest(object):
                  ['b', 'c', 'c'],
 
                  ]))
-    def test_n(self, df_strings, n, order):
+    def test_n(self, df_strings, method, n, order):
         # GH10393
         df = df_strings
+        if order[0] == 'b':
 
-        error_msg = (
-            "'b' has dtype: object, cannot use method 'nsmallest' "
-            "with this dtype"
-        )
-        if 'b' in order:
-            with pytest.raises(TypeError) as exception:
-                df.nsmallest(n, order)
-            assert exception.value, error_msg
+            # Only expect error when 'b' is first in order, as 'a' and 'c' are
+            # unique
+            error_msg = (
+                "'b' has dtype: object, cannot use method 'nsmallest' "
+                "with this dtype"
+            )
+            with pytest.raises(TypeError) as exc_info:
+                getattr(df, method)(n, order)
+            assert exc_info.value, error_msg
         else:
-            result = df.nsmallest(n, order)
-            expected = df.sort_values(order).head(n)
+            ascending = method == 'nsmallest'
+            result = getattr(df, method)(n, order)
+            expected = df.sort_values(order, ascending=ascending).head(n)
             tm.assert_frame_equal(result, expected)
 
-        if 'b' in order:
-            with pytest.raises(TypeError) as exception:
-                df.nsmallest(n, order)
-            assert exception.value, error_msg
-        else:
-            result = df.nlargest(n, order)
-            expected = df.sort_values(order, ascending=False).head(n)
-            tm.assert_frame_equal(result, expected)
+    @pytest.mark.parametrize(
+        'method, columns',
+        product(['nsmallest', 'nlargest'],
+                product(['group'], ['category_string', 'string'])
+                ))
+    def test_n_error(self, df_main_dtypes, method, columns):
+        df = df_main_dtypes
+        with pytest.raises(TypeError) as exc_info:
+            getattr(df, method)(2, columns)
+            msg = "Cannot use method '%s' with dtype %s" % (
+                method, df[columns[1]].dtype
+            )
+            assert exc_info.value, msg
 
-    def test_n_error(self, df_strings):
-        df = pd.DataFrame(
-            {'group': [1, 1, 2],
-             'int': [1, 2, 3],
-             'float': [4., 5., 6.],
-             'string': list('abc'),
-             'category_string': pd.Series(list('abc')).astype('category'),
-             'category_int': [7, 8, 9],
-             'datetime': pd.date_range('20130101', periods=3),
-             'datetimetz': pd.date_range('20130101',
-                                         periods=3,
-                                         tz='US/Eastern'),
-             'timedelta': pd.timedelta_range('1 s', periods=3, freq='s')},
-            columns=['group', 'int', 'float', 'string',
-                     'category_string', 'category_int',
-                     'datetime', 'datetimetz',
-                     'timedelta'])
-        columns_with_errors = {'category_string', 'string'}
-        columns_without_errors = list(set(df) - columns_with_errors)
-        methods = 'nsmallest', 'nlargest'
-        for col in columns_with_errors:
-            for method, cols in product(methods, (col, ['group', col])):
-                with pytest.raises(TypeError) as exc_info:
-                    getattr(df, method)(2, cols)
-                msg = "Cannot use method '%s' with dtype %s" % (
-                    method, df[col].dtype
-                )
-                assert exc_info.value, msg
-        df.nsmallest(2, columns_without_errors)
+    def test_n_all_dtypes(self, df_main_dtypes):
+        df = df_main_dtypes
+        df.nsmallest(2, list(set(df) - {'category_string', 'string'}))
         df.nsmallest(2, ['int', 'string'])  # int column is unique => OK
+        df.nlargest(2, list(set(df) - {'category_string', 'string'}))
+        df.nlargest(2, ['int', 'string'])  # int column is unique => OK
 
     def test_n_identical_values(self):
         # GH15297
